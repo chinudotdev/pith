@@ -323,9 +323,12 @@ func streamResponse(
 				assistant = *event.Message
 			}
 
-		case protocol.EventError:
+			case protocol.EventError:
 			if event.Message != nil {
 				assistant = *event.Message
+			}
+			if event.Reason == protocol.StopAborted {
+				return nil, nil, ctx.Err()
 			}
 		}
 	}

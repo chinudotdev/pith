@@ -64,6 +64,60 @@ func TestStreamFnReceivesContext(t *testing.T) {
 	}
 }
 
+// TestLoopAbortReturnsError verifies that cancelling the loop context
+// causes AgentLoop to return a non-nil error (not silently succeed).
+// Regression test for Issue #4: abort was returning nil error because
+// streamResponse swallowed EventError with StopAborted.
+func TestLoopAbortReturnsError(t *testing.T) {
+	gw := gateway.NewFauxGateway(
+		gateway.FauxResponse{Text: "Hello world, this is a long response that should be interrupted!", StreamDelay: 100 * time.Millisecond},
+	)
+
+	model, _ := gw.Catalog.Get("faux", "faux-model")
+
+	agConfig := loop.LoopConfig{
+		Model: model,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			return gw.Stream(ctx, m, pctx, opts)
+		},
+	}
+
+	agentCtx := loop.AgentContext{
+		SystemPrompt: "You are helpful.",
+		Messages:     nil,
+	}
+
+	prompts := []protocol.Message{
+		protocol.UserMessage{
+			Role:      "user",
+			Content:   []protocol.Content{protocol.TextContent{Type: "text", Text: "hi"}},
+			Timestamp: protocol.Now(),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	loopDone := make(chan error, 1)
+	go func() {
+		_, err := loop.AgentLoop(ctx, prompts, agentCtx, agConfig, func(event loop.LoopEvent) {})
+		loopDone <- err
+	}()
+
+	// Cancel after a short delay (while streaming is still in progress)
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	// AgentLoop should return a non-nil error
+	select {
+	case err := <-loopDone:
+		if err == nil {
+			t.Error("AgentLoop should return a non-nil error when context is cancelled")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for AgentLoop to finish")
+	}
+}
+
 // TestLoopAbortCancelsStreamFn verifies that cancelling the loop context
 // cancels the context passed to StreamFn.
 func TestLoopAbortCancelsStreamFn(t *testing.T) {
