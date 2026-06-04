@@ -66,9 +66,8 @@ func main() {
 	})
 
 	turns := []string{
-		"Hi, what's your name?",
-		"Please remember the word 'apples' for later.",
-		"What word did I ask you to remember?",
+		"Hey, I like apples!",
+		"What do I like?",
 		"Goodbye!",
 	}
 
