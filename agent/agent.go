@@ -13,7 +13,7 @@ import (
 type AgentState struct {
 	SystemPrompt     string
 	Model            protocol.ModelDescriptor
-	ThinkingLevel    protocol.ThinkingLevel
+	ThinkingLevel    *protocol.ThinkingLevel // nil = use model's DefaultThinkingLevel; non-nil = explicit (including "off")
 	Tools            []loop.AgentTool
 	Messages         []protocol.Message
 	IsStreaming       bool

@@ -42,6 +42,7 @@ OPENAI_API_KEY="sk-..." go run main.go
 | 08 | `08-custom-messages/` | MessageRegistry, MessagePipeline, sealed interface limitation |
 | 09 | `09-abort/` | Context cancellation, Agent.Abort(), WaitForIdle() |
 | 10 | `10-capability-negotiation/` | Capability negotiation, tool execution policies, tool hooks |
+| 11 | `11-custom-provider/` | Build a custom ProviderPort (Anthropic Messages API) and wire it through the gateway and agent |
 
 ## Quick Reference
 

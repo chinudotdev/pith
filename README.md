@@ -16,6 +16,7 @@ Go SDK for building LLM agent applications. Four layers — protocol types, LLM 
 | 08 | `08-custom-messages/` | MessageRegistry, MessagePipeline, sealed interface limitation |
 | 09 | `09-abort/` | Context cancellation, Agent.Abort(), WaitForIdle() |
 | 10 | `10-capability-negotiation/` | Capability negotiation, tool execution policies, tool hooks |
+| 11 | `11-custom-provider/` | Build a custom ProviderPort (Anthropic Messages API) and wire it through the gateway and agent |
 
 ```bash
 go run ./examples/01-minimal

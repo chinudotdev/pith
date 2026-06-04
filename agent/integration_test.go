@@ -12,6 +12,10 @@ import (
 	"github.com/chinudotdev/pith/protocol"
 )
 
+func thinkingPtr(level protocol.ThinkingLevel) *protocol.ThinkingLevel {
+	return &level
+}
+
 // TestL0ProtocolTypes verifies all protocol types compile and satisfy interfaces.
 func TestL0ProtocolTypes(t *testing.T) {
 	var _ protocol.Message = protocol.UserMessage{Role: "user"}
@@ -253,7 +257,7 @@ func TestL3AgentBasic(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 		},
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			return gw.Stream(ctx, m, pctx, opts)
@@ -317,7 +321,7 @@ func TestL3AgentWithTools(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 			Tools:         []loop.AgentTool{readTool},
 		},
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
@@ -415,7 +419,7 @@ func TestL3AgentCompact(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 			Messages: []protocol.Message{
 				protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "old message"}}, Timestamp: time.Now()},
 				protocol.AssistantMessage{Role: "assistant", Content: []protocol.ContentBlock{protocol.TextContent{Type: "text", Text: "old response"}}, Timestamp: time.Now()},
@@ -465,7 +469,7 @@ func TestL3AgentAbort(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 		},
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			return gw.Stream(ctx, m, pctx, opts)
@@ -497,7 +501,7 @@ func TestL3AgentQueues(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 		},
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			return gw.Stream(ctx, m, pctx, opts)
@@ -526,7 +530,7 @@ func TestL3AgentSetState(t *testing.T) {
 		InitialState: &agent.AgentState{
 			Model:         model1,
 			SystemPrompt:  "You are helpful.",
-			ThinkingLevel: protocol.ThinkingOff,
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
 		},
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			return gw.Stream(ctx, m, pctx, opts)
@@ -540,8 +544,8 @@ func TestL3AgentSetState(t *testing.T) {
 		t.Error("model should be updated")
 	}
 
-	ag.SetThinkingLevel(protocol.ThinkingHigh)
-	if ag.State().ThinkingLevel != protocol.ThinkingHigh {
+	ag.SetThinkingLevel(thinkingPtr(protocol.ThinkingHigh))
+	if *ag.State().ThinkingLevel != protocol.ThinkingHigh {
 		t.Error("thinking level should be updated")
 	}
 

@@ -30,6 +30,7 @@ type ModelCapabilities struct {
 	Input          map[MediaType]bool `json:"input"`
 	Thinking       bool               `json:"thinking"`
 	ThinkingLevels map[ThinkingLevel]bool `json:"thinkingLevels"`
+	DefaultThinkingLevel ThinkingLevel `json:"defaultThinkingLevel,omitempty"` // model's default when ThinkingLevel is not explicitly set
 	Caching        map[CacheMode]bool `json:"caching"`
 	Transport      map[Transport]bool `json:"transport"`
 }

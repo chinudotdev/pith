@@ -61,9 +61,7 @@ type Agent struct {
 
 // NewAgent creates a new Agent from the given config.
 func NewAgent(config AgentConfig) *Agent {
-	state := AgentState{
-		ThinkingLevel: protocol.ThinkingOff,
-	}
+	state := AgentState{}
 	if config.InitialState != nil {
 		state = *config.InitialState
 	}
@@ -282,7 +280,9 @@ func (a *Agent) SetModel(model protocol.ModelDescriptor) {
 }
 
 // SetThinkingLevel changes the thinking level for subsequent turns.
-func (a *Agent) SetThinkingLevel(level protocol.ThinkingLevel) {
+// Pass nil to use the model's DefaultThinkingLevel; pass a non-nil value
+// (including &protocol.ThinkingOff) to explicitly set it.
+func (a *Agent) SetThinkingLevel(level *protocol.ThinkingLevel) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state.ThinkingLevel = level
@@ -371,9 +371,20 @@ func (a *Agent) runLoopContinue(ctx context.Context) ([]protocol.Message, error)
 }
 
 func (a *Agent) buildLoopConfig() loop.LoopConfig {
+	// Resolve effective thinking level:
+	//   1. nil (unset) → use model's DefaultThinkingLevel
+	//   2. nil + no model default → off
+	//   3. non-nil (including "off") → use it
+	effectiveThinking := protocol.ThinkingOff
+	if a.state.ThinkingLevel != nil {
+		effectiveThinking = *a.state.ThinkingLevel
+	} else if a.state.Model.Capabilities.DefaultThinkingLevel != "" {
+		effectiveThinking = a.state.Model.Capabilities.DefaultThinkingLevel
+	}
+
 	return loop.LoopConfig{
 		Model:          a.state.Model,
-		ThinkingLevel:  a.state.ThinkingLevel,
+		ThinkingLevel:  effectiveThinking,
 		Tools:          a.state.Tools,
 		StreamFn:       a.streamFn,
 		ConvertToLlm:   a.convertToLlm,
