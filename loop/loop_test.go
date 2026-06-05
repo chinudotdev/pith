@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chinudotdev/pith/gateway"
 	"github.com/chinudotdev/pith/loop"
 	"github.com/chinudotdev/pith/protocol"
 )
@@ -13,18 +12,15 @@ import (
 // TestStreamFnReceivesContext verifies that the loop passes context.Context
 // to StreamFn, enabling abort propagation (Issue #4 regression test).
 func TestStreamFnReceivesContext(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello!", StreamDelay: 50 * time.Millisecond},
-	)
-
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := testModel()
 
 	var streamFnCtx context.Context
+	baseStream := fakeStream(streamFakeConfig{Text: "Hello!", StreamDelay: 50 * time.Millisecond})
 	agConfig := loop.LoopConfig{
 		Model: model,
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			streamFnCtx = ctx
-			return gw.Stream(ctx, m, pctx, opts)
+			return baseStream(ctx, m, pctx, opts)
 		},
 	}
 
@@ -53,9 +49,7 @@ func TestStreamFnReceivesContext(t *testing.T) {
 		t.Fatal("StreamFn should receive a non-nil context.Context")
 	}
 
-	// The context should be the same one passed to AgentLoop (or a child)
 	if streamFnCtx != ctx {
-		// It may be a derived context, but it should have the same deadline/cancel
 		select {
 		case <-streamFnCtx.Done():
 			t.Error("streamFn context should not be done yet")
@@ -69,17 +63,14 @@ func TestStreamFnReceivesContext(t *testing.T) {
 // Regression test for Issue #4: abort was returning nil error because
 // streamResponse swallowed EventError with StopAborted.
 func TestLoopAbortReturnsError(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello world, this is a long response that should be interrupted!", StreamDelay: 100 * time.Millisecond},
-	)
-
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := testModel()
 
 	agConfig := loop.LoopConfig{
 		Model: model,
-		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
-			return gw.Stream(ctx, m, pctx, opts)
-		},
+		StreamFn: fakeStream(streamFakeConfig{
+			Text:        "Hello world, this is a long response that should be interrupted!",
+			StreamDelay: 100 * time.Millisecond,
+		}),
 	}
 
 	agentCtx := loop.AgentContext{
@@ -103,11 +94,9 @@ func TestLoopAbortReturnsError(t *testing.T) {
 		loopDone <- err
 	}()
 
-	// Cancel after a short delay (while streaming is still in progress)
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 
-	// AgentLoop should return a non-nil error
 	select {
 	case err := <-loopDone:
 		if err == nil {
@@ -121,18 +110,15 @@ func TestLoopAbortReturnsError(t *testing.T) {
 // TestLoopAbortCancelsStreamFn verifies that cancelling the loop context
 // cancels the context passed to StreamFn.
 func TestLoopAbortCancelsStreamFn(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello!", StreamDelay: 100 * time.Millisecond},
-	)
-
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := testModel()
 
 	streamFnCtxCh := make(chan context.Context, 1)
+	baseStream := fakeStream(streamFakeConfig{Text: "Hello!", StreamDelay: 100 * time.Millisecond})
 	agConfig := loop.LoopConfig{
 		Model: model,
 		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 			streamFnCtxCh <- ctx
-			return gw.Stream(ctx, m, pctx, opts)
+			return baseStream(ctx, m, pctx, opts)
 		},
 	}
 
@@ -157,7 +143,6 @@ func TestLoopAbortCancelsStreamFn(t *testing.T) {
 		loop.AgentLoop(ctx, prompts, agentCtx, agConfig, func(event loop.LoopEvent) {})
 	}()
 
-	// Wait for StreamFn to receive the context
 	var streamFnCtx context.Context
 	select {
 	case streamFnCtx = <-streamFnCtxCh:
@@ -165,18 +150,14 @@ func TestLoopAbortCancelsStreamFn(t *testing.T) {
 		t.Fatal("timed out waiting for StreamFn to be called")
 	}
 
-	// Cancel the loop context
 	cancel()
 
-	// The StreamFn's context should be cancelled
 	select {
 	case <-streamFnCtx.Done():
-		// Good — context was cancelled
 	case <-time.After(2 * time.Second):
 		t.Error("StreamFn context should be cancelled after loop context is cancelled")
 	}
 
-	// Loop should finish
 	select {
 	case <-loopDone:
 	case <-time.After(2 * time.Second):

@@ -8,8 +8,8 @@ use (
 )
 
 replace (
-	github.com/chinudotdev/pith/agent v0.1.0 => ./agent
-	github.com/chinudotdev/pith/gateway v0.1.0 => ./gateway
-	github.com/chinudotdev/pith/loop v0.1.0 => ./loop
-	github.com/chinudotdev/pith/protocol v0.1.0 => ./protocol
+	github.com/chinudotdev/pith/agent v0.1.2 => ./agent
+	github.com/chinudotdev/pith/gateway v0.1.2 => ./gateway
+	github.com/chinudotdev/pith/loop v0.1.2 => ./loop
+	github.com/chinudotdev/pith/protocol v0.1.2 => ./protocol
 )
