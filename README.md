@@ -6,15 +6,21 @@ The built-in `OpenAICompatProvider` covers any `/v1/chat/completions` API (OpenA
 
 **Build agents quickly → [pith-sdk](https://github.com/chinudotdev/pith-sdk)**
 
+> **Multi-module repo.** Import a layer directly:
+> [agent](https://pkg.go.dev/github.com/chinudotdev/pith/agent) ·
+> [gateway](https://pkg.go.dev/github.com/chinudotdev/pith/gateway) ·
+> [loop](https://pkg.go.dev/github.com/chinudotdev/pith/loop) ·
+> [protocol](https://pkg.go.dev/github.com/chinudotdev/pith/protocol)
+
 ## Installation
 
 Import the layer you need. The agent module pulls in gateway, loop, and protocol:
 
 ```bash
-go get github.com/chinudotdev/pith/agent@v0.1.3
-go get github.com/chinudotdev/pith/gateway@v0.1.3
-go get github.com/chinudotdev/pith/loop@v0.1.3
-go get github.com/chinudotdev/pith/protocol@v0.1.3
+go get github.com/chinudotdev/pith/agent@v0.1.4
+go get github.com/chinudotdev/pith/gateway@v0.1.4
+go get github.com/chinudotdev/pith/loop@v0.1.4
+go get github.com/chinudotdev/pith/protocol@v0.1.4
 ```
 
 Requires Go 1.24+.
@@ -41,7 +47,7 @@ Examples are standalone programs (not listed in `go.work`). Copy one into a new 
 mkdir my-agent && cd my-agent
 go mod init my-agent
 cp /path/to/pith/examples/01-minimal/main.go .
-go get github.com/chinudotdev/pith/gateway@v0.1.3
+go get github.com/chinudotdev/pith/gateway@v0.1.4
 OPENAI_API_KEY="sk-..." go run main.go
 ```
 

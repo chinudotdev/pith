@@ -17,6 +17,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 modules=(protocol gateway loop agent)
 
 for mod in "${modules[@]}"; do
+  if [[ ! -f "${root}/${mod}/LICENSE" ]]; then
+    echo "Missing ${mod}/LICENSE — pkg.go.dev will hide API docs without it." >&2
+    exit 1
+  fi
+done
+
+for mod in "${modules[@]}"; do
   tag="${mod}/${version}"
   echo "Tagging ${tag}..."
   git tag -a "$tag" -m "Release ${mod} ${version}"
