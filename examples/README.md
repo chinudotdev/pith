@@ -102,7 +102,7 @@ func main() {
             Model: model, SystemPrompt: "You are helpful.",
             Tools: []loop.AgentTool{myTool},
         },
-        StreamFn: func(m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+        StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
             return gw.Stream(ctx, m, pctx, opts)
         },
     })
