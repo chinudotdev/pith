@@ -62,10 +62,16 @@ type CompactEvent struct {
 // Listener is a function that receives agent events.
 type Listener func(event AgentEvent)
 
+type listenerEntry struct {
+	id uint64
+	fn Listener
+}
+
 // EventBus is a typed, ordered event bus for the agent.
 type EventBus struct {
 	mu        sync.Mutex
-	listeners []Listener
+	listeners []listenerEntry
+	nextID    uint64
 }
 
 // NewEventBus creates a new event bus.
@@ -77,36 +83,18 @@ func NewEventBus() *EventBus {
 func (b *EventBus) Subscribe(listener Listener) func() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.listeners = append(b.listeners, listener)
-	index := len(b.listeners) - 1
+	id := b.nextID
+	b.nextID++
+	b.listeners = append(b.listeners, listenerEntry{id: id, fn: listener})
 	return func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		b.listeners[index] = nil // nil out to preserve order
-		b.compactIfNeeded()
-	}
-}
-
-// compactIfNeeded compacts the listener slice when the nil-hole ratio
-// exceeds 50%, preventing unbounded memory growth from subscribe/unsubscribe churn.
-func (b *EventBus) compactIfNeeded() {
-	if len(b.listeners) < 16 {
-		return // too small to bother
-	}
-	nilCount := 0
-	for _, l := range b.listeners {
-		if l == nil {
-			nilCount++
-		}
-	}
-	if nilCount > len(b.listeners)/2 {
-		compacted := b.listeners[:0]
-		for _, l := range b.listeners {
-			if l != nil {
-				compacted = append(compacted, l)
+		for i, e := range b.listeners {
+			if e.id == id {
+				b.listeners = append(b.listeners[:i], b.listeners[i+1:]...)
+				break
 			}
 		}
-		b.listeners = compacted
 	}
 }
 
@@ -114,13 +102,13 @@ func (b *EventBus) compactIfNeeded() {
 func (b *EventBus) Emit(event AgentEvent) {
 	b.mu.Lock()
 	listeners := make([]Listener, len(b.listeners))
-	copy(listeners, b.listeners)
+	for i, e := range b.listeners {
+		listeners[i] = e.fn
+	}
 	b.mu.Unlock()
 
 	for _, l := range listeners {
-		if l != nil {
-			l(event)
-		}
+		l(event)
 	}
 }
 

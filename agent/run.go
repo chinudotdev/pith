@@ -46,11 +46,15 @@ type Agent struct {
 	followUpQueue *MessageQueue
 
 	// Config
-	streamFn      loop.StreamFn
-	convertToLlm  loop.MessageTransformer
-	toolExecution loop.ToolExecutionPolicy
-	hooks         loop.LoopHooks
-	queueConfig   QueueConfig
+	streamFn        loop.StreamFn
+	convertToLlm    loop.MessageTransformer
+	toolExecution   loop.ToolExecutionPolicy
+	hooks           loop.LoopHooks
+	queueConfig     QueueConfig
+	sessionID       string
+	thinkingBudgets *protocol.ThinkingBudgets
+	transport       protocol.Transport
+	maxRetryDelayMs *int
 
 	// Run state
 	mu      sync.Mutex
@@ -90,16 +94,20 @@ func NewAgent(config AgentConfig) *Agent {
 	}
 
 	return &Agent{
-		state:         state,
-		eventBus:      NewEventBus(),
-		registry:      registry,
-		steeringQueue: NewMessageQueue(queueConfig.SteeringMode),
-		followUpQueue: NewMessageQueue(queueConfig.FollowUpMode),
-		streamFn:      config.StreamFn,
-		convertToLlm:  convertToLlm,
-		toolExecution: config.ToolExecution,
-		hooks:         hooks,
-		queueConfig:   queueConfig,
+		state:           state,
+		eventBus:        NewEventBus(),
+		registry:        registry,
+		steeringQueue:   NewMessageQueue(queueConfig.SteeringMode),
+		followUpQueue:   NewMessageQueue(queueConfig.FollowUpMode),
+		streamFn:        config.StreamFn,
+		convertToLlm:    convertToLlm,
+		toolExecution:   config.ToolExecution,
+		hooks:           hooks,
+		queueConfig:     queueConfig,
+		sessionID:       config.SessionID,
+		thinkingBudgets: config.ThinkingBudgets,
+		transport:       config.Transport,
+		maxRetryDelayMs: config.MaxRetryDelayMs,
 	}
 }
 
@@ -305,13 +313,16 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 // --- Internal: Loop Execution ---
 
 func (a *Agent) runLoop(ctx context.Context, prompts []protocol.Message) ([]protocol.Message, error) {
-	agentCtx := loop.AgentContext{
-		SystemPrompt: a.state.SystemPrompt,
-		Messages:     a.state.Messages,
-		Tools:        a.state.Tools,
-	}
+	a.mu.Lock()
+	state := a.state.Copy()
+	config := a.buildLoopConfig(state)
+	a.mu.Unlock()
 
-	config := a.buildLoopConfig()
+	agentCtx := loop.AgentContext{
+		SystemPrompt: state.SystemPrompt,
+		Messages:     state.Messages,
+		Tools:        state.Tools,
+	}
 
 	// Event sink: forward loop events to agent event bus
 	sink := func(event loop.LoopEvent) {
@@ -340,13 +351,16 @@ func (a *Agent) runLoop(ctx context.Context, prompts []protocol.Message) ([]prot
 }
 
 func (a *Agent) runLoopContinue(ctx context.Context) ([]protocol.Message, error) {
-	agentCtx := loop.AgentContext{
-		SystemPrompt: a.state.SystemPrompt,
-		Messages:     a.state.Messages,
-		Tools:        a.state.Tools,
-	}
+	a.mu.Lock()
+	state := a.state.Copy()
+	config := a.buildLoopConfig(state)
+	a.mu.Unlock()
 
-	config := a.buildLoopConfig()
+	agentCtx := loop.AgentContext{
+		SystemPrompt: state.SystemPrompt,
+		Messages:     state.Messages,
+		Tools:        state.Tools,
+	}
 
 	sink := func(event loop.LoopEvent) {
 		a.eventBus.Emit(AgentEvent{LoopEvent: &event})
@@ -370,27 +384,31 @@ func (a *Agent) runLoopContinue(ctx context.Context) ([]protocol.Message, error)
 	return newMessages, err
 }
 
-func (a *Agent) buildLoopConfig() loop.LoopConfig {
+func (a *Agent) buildLoopConfig(state AgentState) loop.LoopConfig {
 	// Resolve effective thinking level:
 	//   1. nil (unset) → use model's DefaultThinkingLevel
 	//   2. nil + no model default → off
 	//   3. non-nil (including "off") → use it
 	effectiveThinking := protocol.ThinkingOff
-	if a.state.ThinkingLevel != nil {
-		effectiveThinking = *a.state.ThinkingLevel
-	} else if a.state.Model.Capabilities.DefaultThinkingLevel != "" {
-		effectiveThinking = a.state.Model.Capabilities.DefaultThinkingLevel
+	if state.ThinkingLevel != nil {
+		effectiveThinking = *state.ThinkingLevel
+	} else if state.Model.Capabilities.DefaultThinkingLevel != "" {
+		effectiveThinking = state.Model.Capabilities.DefaultThinkingLevel
 	}
 
 	return loop.LoopConfig{
-		Model:          a.state.Model,
-		ThinkingLevel:  effectiveThinking,
-		Tools:          a.state.Tools,
-		StreamFn:       a.streamFn,
-		ConvertToLlm:   a.convertToLlm,
-		ToolExecution:  a.toolExecution,
-		Hooks:          a.hooks,
-		SteeringDrain:  a.steeringQueue.Drain,
-		FollowUpDrain:  a.followUpQueue.Drain,
+		Model:           state.Model,
+		ThinkingLevel:   effectiveThinking,
+		Tools:           state.Tools,
+		StreamFn:        a.streamFn,
+		ConvertToLlm:    a.convertToLlm,
+		ToolExecution:   a.toolExecution,
+		Hooks:           a.hooks,
+		SessionID:       a.sessionID,
+		ThinkingBudgets: a.thinkingBudgets,
+		Transport:       a.transport,
+		MaxRetryDelayMs: a.maxRetryDelayMs,
+		SteeringDrain:   a.steeringQueue.Drain,
+		FollowUpDrain:   a.followUpQueue.Drain,
 	}
 }

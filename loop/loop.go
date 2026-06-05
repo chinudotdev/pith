@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/chinudotdev/pith/protocol"
 )
@@ -422,12 +421,7 @@ func executeToolCalls(
 		}
 	}
 
-	// Execute sequential calls
-	for _, ic := range sequentialCalls {
-		results[ic.index] = executeOneToolCall(ctx, ic.call, assistantMsg, toolMap, config, sink, agentCtx)
-	}
-
-	// Execute parallel calls
+	// Start parallel calls without waiting for sequential calls to finish.
 	if len(parallelCalls) > 0 {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
@@ -443,7 +437,16 @@ func executeToolCalls(
 			}(ic.index, ic.call)
 		}
 
+		// Execute sequential calls concurrently with parallel calls.
+		for _, ic := range sequentialCalls {
+			results[ic.index] = executeOneToolCall(ctx, ic.call, assistantMsg, toolMap, config, sink, agentCtx)
+		}
+
 		wg.Wait()
+	} else {
+		for _, ic := range sequentialCalls {
+			results[ic.index] = executeOneToolCall(ctx, ic.call, assistantMsg, toolMap, config, sink, agentCtx)
+		}
 	}
 
 	return results
@@ -601,7 +604,7 @@ func executeOneToolCall(
 		Content:    toolResult.Content,
 		Details:    toolResult.Details,
 		IsError:    isError,
-		Timestamp:  time.Now().UTC(),
+		Timestamp:  protocol.Now(),
 	}
 
 	// Emit MessageStart + MessageEnd for the tool result

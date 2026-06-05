@@ -5,7 +5,7 @@
 //   - ProviderRegistry: instance-based, not a module-level singleton
 //   - ModelCatalog: programmatic-only (register/get/list/calculateCost)
 //   - CredentialProvider: interface only, no default implementation
-//   - Middleware: composable pipeline (RetryPolicy, HeaderInjector)
+//   - Middleware: composable pipeline (RetryPolicy, HeaderInjector; RateLimiter is a stub)
 //   - LLMGateway: top-level composer (Stream, Complete, StreamSimple)
 //   - FauxProvider: test double for L2/L3 testing
 //

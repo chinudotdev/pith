@@ -2,6 +2,21 @@
 
 Go SDK for building LLM agent applications. Four layers — protocol types, LLM gateway, agent loop, stateful agent — each with a strict dependency boundary and no runtime assumptions.
 
+The built-in `OpenAICompatProvider` covers any `/v1/chat/completions` API (OpenAI, Groq, Together, DeepSeek, OpenRouter, Ollama, etc.). Custom providers (e.g., Anthropic Messages API) are built using the `ProviderPort` interface — see example 11.
+
+## Installation
+
+Import the layer you need. The agent module pulls in gateway, loop, and protocol:
+
+```bash
+go get github.com/chinudotdev/pith/agent@v0.1.3
+go get github.com/chinudotdev/pith/gateway@v0.1.3
+go get github.com/chinudotdev/pith/loop@v0.1.3
+go get github.com/chinudotdev/pith/protocol@v0.1.3
+```
+
+Requires Go 1.24+.
+
 ## Examples
 
 | # | File | Description |
@@ -18,16 +33,21 @@ Go SDK for building LLM agent applications. Four layers — protocol types, LLM 
 | 10 | `10-capability-negotiation/` | Capability negotiation, tool execution policies, tool hooks |
 | 11 | `11-custom-provider/` | Build a custom ProviderPort (Anthropic Messages API) and wire it through the gateway and agent |
 
-```bash
-go run ./examples/01-minimal
-```
+Examples are standalone programs (not listed in `go.work`). Copy one into a new module and run it — see [examples/README.md](examples/README.md):
 
-See [examples/README.md](examples/README.md) for details.
+```bash
+mkdir my-agent && cd my-agent
+go mod init my-agent
+cp /path/to/pith/examples/01-minimal/main.go .
+go get github.com/chinudotdev/pith/gateway@v0.1.3
+OPENAI_API_KEY="sk-..." go run main.go
+```
 
 ## Quick Reference
 
 ```go
 import (
+    "context"
     "os"
 
     "github.com/chinudotdev/pith/agent"
@@ -69,8 +89,8 @@ ag := agent.NewAgent(agent.AgentConfig{
         SystemPrompt: "You are helpful.",
         Tools:        myTools,
     },
-    StreamFn: func(m protocol.ModelDescriptor, ctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
-        return gw.Stream(context.Background(), m, ctx, opts)
+    StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+        return gw.Stream(ctx, m, pctx, opts)
     },
 })
 
