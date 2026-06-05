@@ -1,0 +1,6 @@
+github.com/chinudotdev/pith/gateway v0.1.2 h1:Qs7MC0k4hvyE4O8eBj1085C8/9fHaTDvZ+lMX45GH9Q=
+github.com/chinudotdev/pith/gateway v0.1.2/go.mod h1:c3250imoK4WAMEjEPt7JtgQK/GQoBGPH/TMLagoA8O0=
+github.com/chinudotdev/pith/loop v0.1.2 h1:BW57mHBbohnDOxE76xX+dt82481AE9mRHxirLnB5m+4=
+github.com/chinudotdev/pith/loop v0.1.2/go.mod h1:n6RR6qAvNDCrAGDYA1TQGNHYtprkrVsOFveZZxadUK8=
+github.com/chinudotdev/pith/protocol v0.1.2 h1:Iw64Pn2JWmAkzzbq+6j0M+cNGy6SfdlWN3iwOpqhOVg=
+github.com/chinudotdev/pith/protocol v0.1.2/go.mod h1:tx6tAezPiHkI4Ry6d90Jssc/UqBSkdCpyI1ip+k48Vc=
