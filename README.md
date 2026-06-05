@@ -4,6 +4,8 @@ Go SDK for building LLM agent applications. Four layers — protocol types, LLM 
 
 The built-in `OpenAICompatProvider` covers any `/v1/chat/completions` API (OpenAI, Groq, Together, DeepSeek, OpenRouter, Ollama, etc.). Custom providers (e.g., Anthropic Messages API) are built using the `ProviderPort` interface — see example 11.
 
+**Build agents quickly → [pith-sdk](https://github.com/chinudotdev/pith-sdk)**
+
 ## Installation
 
 Import the layer you need. The agent module pulls in gateway, loop, and protocol:
