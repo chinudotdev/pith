@@ -24,12 +24,12 @@ const (
 // The event type is discriminated by the Type field.
 // Partial always contains the accumulated AssistantMessage so far.
 type StreamEvent struct {
-	Type         StreamEventType `json:"type"`
-	ContentIndex int             `json:"contentIndex,omitempty"`
-	Delta        string          `json:"delta,omitempty"`     // for TextDelta, ThinkingDelta, ToolCallDelta
-	Content      string          `json:"content,omitempty"`   // for TextEnd, ThinkingEnd
-	ToolCall     *ToolCall       `json:"toolCall,omitempty"`  // for ToolCallEnd
-	Reason       StopReason      `json:"reason,omitempty"`    // for Done, Error
-	Message      *AssistantMessage `json:"message,omitempty"` // for Done, Error; final message
-	Partial      *AssistantMessage `json:"partial,omitempty"` // always present: accumulated so far
+	Type         StreamEventType   `json:"type"`
+	ContentIndex int               `json:"contentIndex,omitempty"`
+	Delta        string            `json:"delta,omitempty"`    // for TextDelta, ThinkingDelta, ToolCallDelta
+	Content      string            `json:"content,omitempty"`  // for TextEnd, ThinkingEnd
+	ToolCall     *ToolCall         `json:"toolCall,omitempty"` // for ToolCallEnd
+	Reason       StopReason        `json:"reason,omitempty"`   // for Done, Error
+	Message      *AssistantMessage `json:"message,omitempty"`  // for Done, Error; final message
+	Partial      *AssistantMessage `json:"partial,omitempty"`  // always present: accumulated so far
 }

@@ -1,4 +1,4 @@
-// Example 08: Custom Messages & MessageRegistry — sealed interface, converters, pipeline.
+// Example 08: Custom Messages — custom convertToLlm and message pipeline.
 //
 // This example demonstrates message types locally (no API call needed).
 //
@@ -47,12 +47,8 @@ func main() {
 		return ""
 	}())
 
-	// --- MessageRegistry ---
-	fmt.Println("\n--- MessageRegistry ---")
-	registry := agent.NewMessageRegistry()
-	fmt.Printf("Built-in roles: %v\n", registry.Roles())
-
-	// CompactSummaryMessage is auto-converted to UserMessage.
+	// --- Default convertToLlm ---
+	fmt.Println("\n--- Default convertToLlm ---")
 	compactMsg := protocol.CompactSummaryMessage{
 		Role:         "compactSummary",
 		Summary:      "Previous conversation about capitals.",
@@ -60,10 +56,8 @@ func main() {
 		TokensAfter:  50,
 		Timestamp:    protocol.Now(),
 	}
-	converted := registry.Convert(compactMsg)
-	if converted != nil {
-		fmt.Printf("CompactSummary → %s\n", protocol.MessageRole(*converted))
-	}
+	converted := agent.DefaultConvertToLlm([]protocol.Message{compactMsg})
+	fmt.Printf("Converted messages: %d\n", len(converted))
 
 	// --- MessagePipeline ---
 	fmt.Println("\n--- MessagePipeline ---")

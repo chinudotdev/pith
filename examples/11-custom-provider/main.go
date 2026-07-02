@@ -3,13 +3,16 @@
 // (SSE streaming) and wires it through the gateway and agent.
 //
 // This demonstrates that:
+//
 //   - ProviderPort is the extension point for any LLM API
+//
 //   - The gateway, catalog, and agent don't need to know about your provider
+//
 //   - You can mix custom providers with built-in ones in the same gateway
 //
-//	mkdir my-agent && cd my-agent && go mod init my-agent
-//	cp main.go . && go mod tidy
-//	ANTHROPIC_API_KEY="sk-ant-..." go run main.go
+//     mkdir my-agent && cd my-agent && go mod init my-agent
+//     cp main.go . && go mod tidy
+//     ANTHROPIC_API_KEY="sk-ant-..." go run main.go
 package main
 
 import (
@@ -62,21 +65,14 @@ func NewAnthropicProvider(cfg AnthropicConfig) *AnthropicProvider {
 
 // --- ProviderPort interface ---
 
-func (p *AnthropicProvider) API() protocol.ApiId    { return protocol.ApiAnthropicMessages }
-func (p *AnthropicProvider) Name() string           { return "anthropic" }
-func (p *AnthropicProvider) Initialize() error      { return nil }
-func (p *AnthropicProvider) Cleanup()               {}
+func (p *AnthropicProvider) API() protocol.ApiId { return protocol.ApiAnthropicMessages }
+func (p *AnthropicProvider) Name() string        { return "anthropic" }
+func (p *AnthropicProvider) Initialize() error   { return nil }
+func (p *AnthropicProvider) Cleanup()            {}
 
 func (p *AnthropicProvider) Capabilities() gateway.ProviderCapabilities {
 	return gateway.ProviderCapabilities{
-		MaxTokensField:                  gateway.MaxTokensLegacy,
-		SupportsTemperature:             true,
-		CacheControlFormat:              gateway.CacheControlAnthropic,
-		SupportsCacheControlOnTools:     true,
-		SupportsEagerToolInputStreaming:  true,
-		ThinkingFormat:                   gateway.ThinkingAntLing,
-		ForceAdaptiveThinking:            true,
-		AllowEmptySignature:              true,
+		MaxTokensField: gateway.MaxTokensLegacy,
 	}
 }
 
@@ -214,15 +210,13 @@ func (p *AnthropicProvider) buildRequest(model protocol.ModelDescriptor, ctx pro
 	// Extended thinking
 	if opts.Reasoning != "" && opts.Reasoning != protocol.ThinkingOff {
 		budgetTokens := 10000
-		if opts.ThinkingBudgets != nil {
-			switch opts.Reasoning {
-			case protocol.ThinkingLow:
-				if v := opts.ThinkingBudgets.Low; v != nil { budgetTokens = *v }
-			case protocol.ThinkingMedium:
-				if v := opts.ThinkingBudgets.Medium; v != nil { budgetTokens = *v }
-			case protocol.ThinkingHigh:
-				if v := opts.ThinkingBudgets.High; v != nil { budgetTokens = *v }
-			}
+		switch opts.Reasoning {
+		case protocol.ThinkingLow:
+			budgetTokens = 4000
+		case protocol.ThinkingMedium:
+			budgetTokens = 8000
+		case protocol.ThinkingHigh:
+			budgetTokens = 12000
 		}
 		body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budgetTokens}
 		if mt, ok := body["max_tokens"].(int); ok && mt <= budgetTokens {
@@ -395,27 +389,27 @@ func (p *AnthropicProvider) parseSSEStream(ctx context.Context, body io.ReadClos
 // --- Anthropic SSE JSON types ---
 
 type anthropicSSE struct {
-	Type         string                `json:"type"`
-	Message      *anthropicMsg         `json:"message,omitempty"`
-	Index        int                   `json:"index,omitempty"`
-	ContentBlock *anthropicContentBlk  `json:"content_block,omitempty"`
-	Delta        *anthropicDelta       `json:"delta,omitempty"`
-	Usage        *anthropicUsage       `json:"usage,omitempty"`
-	Error        *anthropicErr         `json:"error,omitempty"`
+	Type         string               `json:"type"`
+	Message      *anthropicMsg        `json:"message,omitempty"`
+	Index        int                  `json:"index,omitempty"`
+	ContentBlock *anthropicContentBlk `json:"content_block,omitempty"`
+	Delta        *anthropicDelta      `json:"delta,omitempty"`
+	Usage        *anthropicUsage      `json:"usage,omitempty"`
+	Error        *anthropicErr        `json:"error,omitempty"`
 }
 
 type anthropicMsg struct {
-	ID    string           `json:"id"`
-	Model string           `json:"model"`
-	Usage *anthropicUsage  `json:"usage,omitempty"`
+	ID    string          `json:"id"`
+	Model string          `json:"model"`
+	Usage *anthropicUsage `json:"usage,omitempty"`
 }
 
 type anthropicContentBlk struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 type anthropicDelta struct {
@@ -465,7 +459,7 @@ func contentToAnthropic(content []protocol.Content) any {
 			parts = append(parts, map[string]any{"type": "text", "text": v.Text})
 		case protocol.ImageContent:
 			parts = append(parts, map[string]any{
-				"type":  "image",
+				"type": "image",
 				"source": map[string]any{
 					"type":       "base64",
 					"media_type": v.MimeType,
@@ -544,8 +538,8 @@ func main() {
 		}
 	})
 
-	// --- Step 4: Register the model in the catalog ---
-	gw.Catalog.Register("anthropic", protocol.ModelDescriptor{
+	// --- Step 4: Define model descriptor ---
+	model := protocol.ModelDescriptor{
 		ID:            "claude-sonnet-4-20250514",
 		Name:          "Claude Sonnet 4",
 		API:           protocol.ApiAnthropicMessages,
@@ -554,8 +548,8 @@ func main() {
 		ContextWindow: 200000,
 		MaxTokens:     8192,
 		Capabilities: protocol.ModelCapabilities{
-			Input:     map[protocol.MediaType]bool{protocol.MediaText: true, protocol.MediaImage: true},
-			Thinking:  true,
+			Input:    map[protocol.MediaType]bool{protocol.MediaText: true, protocol.MediaImage: true},
+			Thinking: true,
 			ThinkingLevels: map[protocol.ThinkingLevel]bool{
 				protocol.ThinkingOff:    true,
 				protocol.ThinkingLow:    true,
@@ -563,18 +557,12 @@ func main() {
 				protocol.ThinkingHigh:   true,
 			},
 			DefaultThinkingLevel: protocol.ThinkingLow, // Claude Sonnet 4 defaults to low
-			Caching:   map[protocol.CacheMode]bool{protocol.CacheNone: true, protocol.CacheShort: true},
-			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
+			Caching:              map[protocol.CacheMode]bool{protocol.CacheNone: true},
+			Transport:            map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
 		Cost: protocol.CostRates{
 			Input: 3.0, Output: 15.0, CacheRead: 0.3, CacheWrite: 3.75,
 		},
-	})
-
-	model, ok := gw.Catalog.Get("anthropic", "claude-sonnet-4-20250514")
-	if !ok {
-		fmt.Fprintln(os.Stderr, "model not found")
-		os.Exit(1)
 	}
 
 	// --- Step 5: Create the agent, wiring the gateway's Stream function ---
@@ -653,7 +641,13 @@ func main() {
 	// --- Show cost ---
 	if len(state.Messages) > 0 {
 		if am, ok := state.Messages[len(state.Messages)-1].(protocol.AssistantMessage); ok {
-			cost := gw.Catalog.CalculateCost(model, am.Usage)
+			cost := protocol.Cost{
+				Input:      float64(am.Usage.Input) * model.Cost.Input / 1_000_000,
+				Output:     float64(am.Usage.Output) * model.Cost.Output / 1_000_000,
+				CacheRead:  float64(am.Usage.CacheRead) * model.Cost.CacheRead / 1_000_000,
+				CacheWrite: float64(am.Usage.CacheWrite) * model.Cost.CacheWrite / 1_000_000,
+			}
+			cost.Total = cost.Input + cost.Output + cost.CacheRead + cost.CacheWrite
 			fmt.Printf("\nCost: $%.6f (input=$%.6f output=$%.6f)\n", cost.Total, cost.Input, cost.Output)
 		}
 	}

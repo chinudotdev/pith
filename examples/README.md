@@ -36,12 +36,12 @@ OPENAI_API_KEY="sk-..." go run main.go
 | 02 | `02-basic-agent/` | Agent lifecycle, event bus, transcript inspection |
 | 03 | `03-agent-with-tools/` | Tool definition, tool execution, transcript with tool calls |
 | 04 | `04-multi-turn/` | Multi-turn conversation across Prompt() calls |
-| 05 | `05-compaction/` | EstimateTokens, ShouldCompact, CompactMessages, Agent.Compact() |
+| 05 | `05-compaction/` | CompactMessages, Agent.Compact(), app token heuristics |
 | 06 | `06-steering-followup/` | Steering queue (mid-loop injection) & follow-up queue |
-| 07 | `07-middleware/` | Custom middleware, RetryPolicy, HeaderInjector, logging |
-| 08 | `08-custom-messages/` | MessageRegistry, MessagePipeline, sealed interface limitation |
+| 07 | `07-middleware/` | Custom middleware (logging/timing/retry/header) |
+| 08 | `08-custom-messages/` | DefaultConvertToLlm, MessagePipeline, sealed interface limitation |
 | 09 | `09-abort/` | Context cancellation, Agent.Abort(), WaitForIdle() |
-| 10 | `10-capability-negotiation/` | Capability negotiation, tool execution policies, tool hooks |
+| 10 | `10-capability-negotiation/` | Tool execution policies and hooks |
 | 11 | `11-custom-provider/` | Build a custom ProviderPort (Anthropic Messages API) and wire it through the gateway and agent |
 
 ## Quick Reference
@@ -72,14 +72,13 @@ func main() {
     gw.Credentials = gateway.CredentialProviderFunc(func(pid protocol.ProviderId) (protocol.Credential, error) {
         return protocol.ApiKey{Key: os.Getenv("OPENAI_API_KEY")}, nil
     })
-    gw.Catalog.Register("openai", protocol.ModelDescriptor{
+    model := protocol.ModelDescriptor{
         ID: "gpt-4o-mini", API: protocol.ApiOpenAICompletions, Provider: "openai",
         BaseURL: "https://api.openai.com", ContextWindow: 128000, MaxTokens: 4096,
         Capabilities: protocol.ModelCapabilities{
             Input: map[protocol.MediaType]bool{protocol.MediaText: true},
         },
-    })
-    model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
+    }
 
     // --- Minimal: stream directly ---
     ch, _ := gw.Stream(ctx, model, protocol.Context{
@@ -116,10 +115,7 @@ func main() {
     ag.Prompt(ctx, "Hello!")
 
     // --- Compaction ---
-    if agent.ShouldCompact(ag.State().Messages, agent.CompactionSettings{Enabled: true}, model) {
-        tokens := agent.EstimateTokens(ag.State().Messages)
-        ag.Compact("Summary of conversation", 2, tokens, nil)
-    }
+    ag.Compact("Summary of conversation", 2, 1200, 180)
 
     // --- Steering & Follow-Up ---
     ag.FollowUp(protocol.UserMessage{Role: "user", Content: []protocol.Content{

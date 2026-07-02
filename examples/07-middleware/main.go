@@ -1,4 +1,4 @@
-// Example 07: Middleware Pipeline — logging, timing, RetryPolicy, HeaderInjector.
+// Example 07: Middleware Pipeline — logging, timing, custom retry/header middleware.
 //
 //	mkdir my-agent && cd my-agent && go mod init my-agent
 //	cp main.go . && go mod tidy
@@ -59,6 +59,48 @@ func (t *TimingMiddleware) Wrap(inner gateway.StreamFunction) gateway.StreamFunc
 	}
 }
 
+type HeaderMiddleware struct {
+	Headers map[string]string
+}
+
+func (h *HeaderMiddleware) Name() string { return "header" }
+func (h *HeaderMiddleware) Wrap(inner gateway.StreamFunction) gateway.StreamFunction {
+	return func(ctx context.Context, model protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		if opts.Headers == nil {
+			opts.Headers = map[string]string{}
+		}
+		for k, v := range h.Headers {
+			opts.Headers[k] = v
+		}
+		return inner(ctx, model, pctx, opts)
+	}
+}
+
+type RetryMiddleware struct {
+	MaxAttempts int
+	Wait        time.Duration
+}
+
+func (r *RetryMiddleware) Name() string { return "retry" }
+func (r *RetryMiddleware) Wrap(inner gateway.StreamFunction) gateway.StreamFunction {
+	return func(ctx context.Context, model protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		var lastErr error
+		for attempt := 0; attempt < r.MaxAttempts; attempt++ {
+			ch, err := inner(ctx, model, pctx, opts)
+			if err == nil {
+				return ch, nil
+			}
+			lastErr = err
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(r.Wait):
+			}
+		}
+		return nil, lastErr
+	}
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -73,7 +115,7 @@ func main() {
 		}
 		return protocol.ApiKey{Key: key}, nil
 	})
-	gw.Catalog.Register("openai", protocol.ModelDescriptor{
+	model := protocol.ModelDescriptor{
 		ID:            "gpt-4o-mini",
 		Name:          "GPT-4o Mini",
 		API:           protocol.ApiOpenAICompletions,
@@ -85,30 +127,20 @@ func main() {
 			Input:     map[protocol.MediaType]bool{protocol.MediaText: true},
 			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
-	})
+	}
 
 	// Add middleware (first added = outermost).
 	gw.Middleware = []gateway.Middleware{
 		&LoggingMiddleware{},
 		&TimingMiddleware{},
-		&gateway.HeaderInjector{
+		&HeaderMiddleware{
 			Headers: map[string]string{"X-Custom-Header": "my-value"},
 		},
-		&gateway.RetryPolicy{
+		&RetryMiddleware{
 			MaxAttempts: 3,
-			Backoff: &gateway.ExponentialBackoff{
-				InitialDelay: 100 * time.Millisecond,
-				MaxDelay:     5 * time.Second,
-				Multiplier:   2.0,
-			},
-			RetryableOn: map[protocol.ErrorCode]bool{
-				protocol.ErrRateLimited: true,
-				protocol.ErrTimeout:    true,
-			},
+			Wait:        250 * time.Millisecond,
 		},
 	}
-
-	model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
 
 	pctx := protocol.Context{
 		SystemPrompt: "You are helpful. Be concise.",

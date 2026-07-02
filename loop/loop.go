@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -50,11 +51,11 @@ func AgentLoopContinue(
 type exitReason int
 
 const (
-	exitStop         exitReason = iota // natural end: no tool calls, no steering, no follow-up
-	exitAbort                          // context cancelled
-	exitError                          // provider or tool error
-	exitHookStop                       // shouldStopAfterTurn returned true
-	exitToolTerminate                  // a tool result requested termination
+	exitStop          exitReason = iota // natural end: no tool calls, no steering, no follow-up
+	exitAbort                           // context cancelled
+	exitError                           // provider or tool error
+	exitHookStop                        // shouldStopAfterTurn returned true
+	exitToolTerminate                   // a tool result requested termination
 )
 
 func runLoop(
@@ -157,6 +158,17 @@ outer:
 						break outer // exitHookStop
 					}
 				}
+				if config.SteeringDrain != nil {
+					if steered := config.SteeringDrain(); len(steered) > 0 {
+						for _, sm := range steered {
+							messages = append(messages, sm)
+							allNewMessages = append(allNewMessages, sm)
+							sink(LoopEvent{Type: LoopMessageStart, Message: sm})
+							sink(LoopEvent{Type: LoopMessageEnd, Message: sm})
+						}
+						continue inner
+					}
+				}
 				break inner // exitStop (check follow-up)
 			}
 
@@ -193,6 +205,9 @@ outer:
 					}
 					if update.Context != nil {
 						agentCtx = *update.Context
+					}
+					if update.ThinkingLevel != "" {
+						config.ThinkingLevel = update.ThinkingLevel
 					}
 				}
 			}
@@ -264,7 +279,8 @@ func streamResponse(
 	// Build stream options
 	opts := protocol.StreamOptions{
 		Reasoning:       config.ThinkingLevel,
-		ThinkingBudgets: config.ThinkingBudgets,
+		Temperature:     config.Temperature,
+		MaxTokens:       config.MaxTokens,
 		Transport:       config.Transport,
 		SessionID:       config.SessionID,
 		MaxRetryDelayMs: config.MaxRetryDelayMs,
@@ -280,6 +296,8 @@ func streamResponse(
 	var assistant protocol.AssistantMessage
 	var toolCalls []protocol.ToolCall
 	var textContent []protocol.ContentBlock
+	var thinkingContent []protocol.ContentBlock
+	currentThinking := ""
 
 	sink(LoopEvent{Type: LoopTurnStart})
 
@@ -307,6 +325,24 @@ func streamResponse(
 				Type:        LoopMessageUpdate,
 				StreamEvent: &event,
 			})
+			switch event.Type {
+			case protocol.EventThinkingStart:
+				currentThinking = ""
+			case protocol.EventThinkingDelta:
+				currentThinking += event.Delta
+			case protocol.EventThinkingEnd:
+				thinking := event.Content
+				if thinking == "" {
+					thinking = currentThinking
+				}
+				if thinking != "" {
+					thinkingContent = append(thinkingContent, protocol.ThinkingContent{
+						Type:     "thinking",
+						Thinking: thinking,
+					})
+				}
+				currentThinking = ""
+			}
 
 		case protocol.EventToolCallStart, protocol.EventToolCallDelta, protocol.EventToolCallEnd:
 			sink(LoopEvent{
@@ -322,13 +358,22 @@ func streamResponse(
 				assistant = *event.Message
 			}
 
-			case protocol.EventError:
+		case protocol.EventError:
 			if event.Message != nil {
 				assistant = *event.Message
 			}
 			if event.Reason == protocol.StopAborted {
-				return nil, nil, ctx.Err()
+				err := ctx.Err()
+				if err == nil {
+					err = protocol.NewError(protocol.ErrAborted, "stream aborted")
+				}
+				return nil, nil, err
 			}
+			errMsg := "stream failed"
+			if assistant.ErrorMessage != "" {
+				errMsg = assistant.ErrorMessage
+			}
+			return nil, nil, protocol.NewErrorWithCause(protocol.ErrUnknown, errMsg, errors.New(errMsg))
 		}
 	}
 
@@ -342,11 +387,22 @@ func streamResponse(
 			Model:     config.Model.ID,
 			Timestamp: protocol.Now(),
 		}
+		assistant.Content = append(assistant.Content, thinkingContent...)
 		// No complete message from provider — manually append tool calls
 		for _, tc := range toolCalls {
 			assistant.Content = append(assistant.Content, tc)
 		}
 	} else {
+		hasThinking := false
+		for _, block := range assistant.Content {
+			if _, ok := block.(protocol.ThinkingContent); ok {
+				hasThinking = true
+				break
+			}
+		}
+		if !hasThinking {
+			assistant.Content = append(assistant.Content, thinkingContent...)
+		}
 		// Ensure tool calls are present in content even if provider
 		// didn't include them in the final message
 		hasToolCalls := false

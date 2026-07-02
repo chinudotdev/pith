@@ -39,25 +39,19 @@ func main() {
 		return protocol.ApiKey{Key: key}, nil
 	})
 
-	// Register the model you want to use.
-	gw.Catalog.Register("openai", protocol.ModelDescriptor{
-		ID:           "gpt-4o-mini",
-		Name:         "GPT-4o Mini",
-		API:          protocol.ApiOpenAICompletions,
-		Provider:     "openai",
-		BaseURL:      "https://api.openai.com",
+	// Define the model you want to use.
+	model := protocol.ModelDescriptor{
+		ID:            "gpt-4o-mini",
+		Name:          "GPT-4o Mini",
+		API:           protocol.ApiOpenAICompletions,
+		Provider:      "openai",
+		BaseURL:       "https://api.openai.com",
 		ContextWindow: 128000,
 		MaxTokens:     4096,
 		Capabilities: protocol.ModelCapabilities{
 			Input:     map[protocol.MediaType]bool{protocol.MediaText: true, protocol.MediaImage: true},
 			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
-	})
-
-	model, ok := gw.Catalog.Get("openai", "gpt-4o-mini")
-	if !ok {
-		fmt.Fprintln(os.Stderr, "model not found")
-		os.Exit(1)
 	}
 
 	// Stream a response.

@@ -13,39 +13,21 @@ type Context struct {
 
 // --- Stream Options ---
 
-// ThinkingBudgets configures per-level token budgets for thinking.
-type ThinkingBudgets struct {
-	Minimal *int `json:"minimal,omitempty"`
-	Low     *int `json:"low,omitempty"`
-	Medium  *int `json:"medium,omitempty"`
-	High    *int `json:"high,omitempty"`
-}
-
 // StreamOptions controls a single LLM streaming request.
 // No API key field — credentials are resolved by CredentialProvider in L1.
 type StreamOptions struct {
-	Temperature              *float64         `json:"temperature,omitempty"`
-	MaxTokens                *int             `json:"maxTokens,omitempty"`
-	Signal                   <-chan struct{}  `json:"-"` // abort signal
-	Transport                Transport        `json:"transport,omitempty"`
-	CacheRetention           CacheMode        `json:"cacheRetention,omitempty"`
-	SessionID                string           `json:"sessionId,omitempty"`
-	Headers                  map[string]string `json:"headers,omitempty"`
-	TimeoutMs                *int             `json:"timeoutMs,omitempty"`
-	WebsocketConnectTimeoutMs *int            `json:"websocketConnectTimeoutMs,omitempty"`
-	MaxRetries               *int             `json:"maxRetries,omitempty"`
-	MaxRetryDelayMs          *int             `json:"maxRetryDelayMs,omitempty"`
-	Metadata                 map[string]any   `json:"metadata,omitempty"`
-	Reasoning                ThinkingLevel    `json:"reasoning,omitempty"`
-	ThinkingBudgets          *ThinkingBudgets `json:"thinkingBudgets,omitempty"`
+	Temperature     *float64          `json:"temperature,omitempty"`
+	MaxTokens       *int              `json:"maxTokens,omitempty"`
+	Transport       Transport         `json:"transport,omitempty"`
+	SessionID       string            `json:"sessionId,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	MaxRetryDelayMs *int              `json:"maxRetryDelayMs,omitempty"`
+	Metadata        map[string]any    `json:"metadata,omitempty"`
+	Reasoning       ThinkingLevel     `json:"reasoning,omitempty"`
 
 	// Resolved credential, set by L1 gateway before calling the provider.
 	// Providers read this instead of parsing Metadata.
 	Credential Credential `json:"-"`
-
-	// Callbacks (not serialized)
-	OnPayload  func(payload map[string]any) map[string]any `json:"-"`
-	OnResponse func(status int, headers map[string]string)  `json:"-"`
 }
 
 // ProviderResponse captures the HTTP response metadata from a provider.
@@ -61,25 +43,20 @@ type ErrorCode = string
 
 // Known error codes.
 const (
-	ErrNotFound          ErrorCode = "not_found"
-	ErrPermissionDenied  ErrorCode = "permission_denied"
-	ErrTimeout           ErrorCode = "timeout"
-	ErrRateLimited       ErrorCode = "rate_limited"
-	ErrAborted           ErrorCode = "aborted"
-	ErrInvalid           ErrorCode = "invalid"
-	ErrNotSupported      ErrorCode = "not_supported"
-	ErrUnknown           ErrorCode = "unknown"
-	ErrNotDirectory      ErrorCode = "not_directory"
-	ErrIsDirectory       ErrorCode = "is_directory"
-	ErrSpawnError        ErrorCode = "spawn_error"
-	ErrSummarization     ErrorCode = "summarization_failed"
-	ErrInvalidSession    ErrorCode = "invalid_session"
-	ErrStorage           ErrorCode = "storage"
-	ErrBusy              ErrorCode = "busy"
-	ErrInvalidState      ErrorCode = "invalid_state"
-	ErrInvalidArgument   ErrorCode = "invalid_argument"
-	ErrAuth              ErrorCode = "auth"
-	ErrHook              ErrorCode = "hook"
+	ErrNotFound         ErrorCode = "not_found"
+	ErrPermissionDenied ErrorCode = "permission_denied"
+	ErrTimeout          ErrorCode = "timeout"
+	ErrRateLimited      ErrorCode = "rate_limited"
+	ErrAborted          ErrorCode = "aborted"
+	ErrInvalid          ErrorCode = "invalid"
+	ErrNotSupported     ErrorCode = "not_supported"
+	ErrUnknown          ErrorCode = "unknown"
+	ErrSummarization    ErrorCode = "summarization_failed"
+	ErrBusy             ErrorCode = "busy"
+	ErrInvalidState     ErrorCode = "invalid_state"
+	ErrInvalidArgument  ErrorCode = "invalid_argument"
+	ErrAuth             ErrorCode = "auth"
+	ErrHook             ErrorCode = "hook"
 )
 
 // Error is a structured error with code, message, and optional cause.

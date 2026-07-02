@@ -20,6 +20,10 @@
 //   - LoopHooks: BeforeToolCall, AfterToolCall, ShouldStopAfterTurn, PrepareNextTurn
 //   - ErrorChannel: structured errors (ProviderError, ToolError, AbortError)
 //
+// Concurrency note:
+// Tool execution events can be emitted from multiple goroutines when tools run in
+// parallel. EventSink implementations must be safe for concurrent calls.
+//
 // Layer map:
 //
 //	L0: Protocol       — pure types

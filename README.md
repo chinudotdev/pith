@@ -17,10 +17,10 @@ The built-in `OpenAICompatProvider` covers any `/v1/chat/completions` API (OpenA
 Import the layer you need. The agent module pulls in gateway, loop, and protocol:
 
 ```bash
-go get github.com/chinudotdev/pith/agent@v0.1.4
-go get github.com/chinudotdev/pith/gateway@v0.1.4
-go get github.com/chinudotdev/pith/loop@v0.1.4
-go get github.com/chinudotdev/pith/protocol@v0.1.4
+go get github.com/chinudotdev/pith/agent@v0.2.0
+go get github.com/chinudotdev/pith/gateway@v0.2.0
+go get github.com/chinudotdev/pith/loop@v0.2.0
+go get github.com/chinudotdev/pith/protocol@v0.2.0
 ```
 
 Requires Go 1.24+.
@@ -33,12 +33,12 @@ Requires Go 1.24+.
 | 02 | `02-basic-agent/` | Agent lifecycle, event bus, transcript inspection |
 | 03 | `03-agent-with-tools/` | Tool definition, tool execution, transcript with tool calls |
 | 04 | `04-multi-turn/` | Multi-turn conversation across Prompt() calls |
-| 05 | `05-compaction/` | EstimateTokens, ShouldCompact, CompactMessages, Agent.Compact() |
+| 05 | `05-compaction/` | CompactMessages, Agent.Compact(), app-owned token heuristics |
 | 06 | `06-steering-followup/` | Steering queue (mid-loop injection) & follow-up queue |
-| 07 | `07-middleware/` | Custom middleware, RetryPolicy, HeaderInjector, logging |
-| 08 | `08-custom-messages/` | MessageRegistry, MessagePipeline, sealed interface limitation |
+| 07 | `07-middleware/` | Custom middleware (logging/timing/retry/header) |
+| 08 | `08-custom-messages/` | DefaultConvertToLlm, MessagePipeline, sealed interface limitation |
 | 09 | `09-abort/` | Context cancellation, Agent.Abort(), WaitForIdle() |
-| 10 | `10-capability-negotiation/` | Capability negotiation, tool execution policies, tool hooks |
+| 10 | `10-capability-negotiation/` | Tool execution policies and hooks (SDK preflight note) |
 | 11 | `11-custom-provider/` | Build a custom ProviderPort (Anthropic Messages API) and wire it through the gateway and agent |
 
 Examples are standalone programs (not listed in `go.work`). Copy one into a new module and run it — see [examples/README.md](examples/README.md):
@@ -47,7 +47,7 @@ Examples are standalone programs (not listed in `go.work`). Copy one into a new 
 mkdir my-agent && cd my-agent
 go mod init my-agent
 cp /path/to/pith/examples/01-minimal/main.go .
-go get github.com/chinudotdev/pith/gateway@v0.1.4
+go get github.com/chinudotdev/pith/gateway@v0.2.0
 OPENAI_API_KEY="sk-..." go run main.go
 ```
 
@@ -73,12 +73,10 @@ gw.Providers.Register(providers.NewOpenAICompatProvider(providers.OpenAICompatCo
 gw.Credentials = gateway.CredentialProviderFunc(func(pid protocol.ProviderId) (protocol.Credential, error) {
     return protocol.ApiKey{Key: os.Getenv("OPENAI_API_KEY")}, nil
 })
-gw.Catalog.Register("openai", protocol.ModelDescriptor{
+model := protocol.ModelDescriptor{
     ID: "gpt-4o-mini", API: protocol.ApiOpenAICompletions, Provider: "openai",
     BaseURL: "https://api.openai.com", ContextWindow: 128000, MaxTokens: 4096,
-})
-
-model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
+}
 
 stream, _ := gw.Stream(ctx, model, protocol.Context{
     SystemPrompt: "You are helpful.",
@@ -114,10 +112,7 @@ ag.Prompt(ctx, "Hello!")
 
 // --- Compaction ---
 
-if agent.ShouldCompact(ag.State().Messages, agent.CompactionSettings{Enabled: true}, model) {
-    tokens := agent.EstimateTokens(ag.State().Messages)
-    ag.Compact("Summary of conversation", 2, tokens, nil)
-}
+ag.Compact("Summary of conversation", 2, 1200, 180)
 
 // --- Steering & Follow-Up ---
 
@@ -139,15 +134,14 @@ ag.WaitForIdle()
 | Primitive | Layer | Purpose |
 |-----------|-------|---------|
 | `protocol.*` | L0 | Pure types: messages, content, stream events, model descriptors, errors |
-| `LLMGateway.Stream / Complete` | L1 | Compose providers + catalog + credentials + middleware |
+| `LLMGateway.Stream / Complete` | L1 | Compose providers + credentials + middleware |
 | `OpenAICompatProvider` | L1 | Provider for any /v1/chat/completions API (OpenAI, Groq, Together, etc.) |
 | `ProviderRegistry` | L1 | Instance-based provider registration |
-| `ModelCatalog` | L1 | Programmatic model registration and cost calculation |
 | `CredentialProvider` | L1 | Interface for API key resolution (no default) |
-| `Middleware` | L1 | Composable pipeline: RetryPolicy, HeaderInjector |
+| `Middleware` | L1 | Composable gateway pipeline |
 | `AgentLoop` | L2 | Stateless turn executor (takes StreamFn, not L1 directly) |
 | `Agent.Prompt / Continue / Abort` | L3 | Stateful in-memory agent |
 | `EventBus` | L3 | Typed subscribe/unsubscribe event dispatch |
 | `MessageQueue` | L3 | Steering + follow-up queues |
-| `MessageRegistry` | L3 | Runtime message type conversion |
-| `EstimateTokens / ShouldCompact / CompactMessages` | L3 | Compaction primitives (no policy) |
+| `DefaultConvertToLlm` | L3 | Default conversion for compact summaries |
+| `CompactMessages` | L3 | Mechanical compaction primitive |

@@ -8,6 +8,7 @@ import (
 
 	"github.com/chinudotdev/pith/agent"
 	"github.com/chinudotdev/pith/gateway"
+	"github.com/chinudotdev/pith/gateway/gatewaytest"
 	"github.com/chinudotdev/pith/loop"
 	"github.com/chinudotdev/pith/protocol"
 )
@@ -47,11 +48,11 @@ func TestL1GatewayInstanceBased(t *testing.T) {
 	gw1 := gateway.NewLLMGateway()
 	gw2 := gateway.NewLLMGateway()
 
-	faux1 := gateway.NewFauxProvider(protocol.ApiOpenAICompletions, "faux-1",
-		gateway.FauxResponse{Text: "hello from gw1"},
+	faux1 := gatewaytest.NewFauxProvider(protocol.ApiOpenAICompletions, "faux-1",
+		gatewaytest.FauxResponse{Text: "hello from gw1"},
 	)
-	faux2 := gateway.NewFauxProvider(protocol.ApiOpenAICompletions, "faux-2",
-		gateway.FauxResponse{Text: "hello from gw2"},
+	faux2 := gatewaytest.NewFauxProvider(protocol.ApiOpenAICompletions, "faux-2",
+		gatewaytest.FauxResponse{Text: "hello from gw2"},
 	)
 
 	gw1.Providers.Register(faux1)
@@ -64,29 +65,6 @@ func TestL1GatewayInstanceBased(t *testing.T) {
 		t.Error("gw2 should have faux-2")
 	}
 
-	model1 := gateway.FauxModel()
-	model1.ID = "model-1"
-	model2 := gateway.FauxModel()
-	model2.ID = "model-2"
-
-	gw1.Catalog.Register("faux", model1)
-	gw2.Catalog.Register("faux", model2)
-
-	m1, ok1 := gw1.Catalog.Get("faux", "model-1")
-	m2, ok2 := gw2.Catalog.Get("faux", "model-2")
-
-	if !ok1 || m1.ID != "model-1" {
-		t.Error("gw1 should have model-1")
-	}
-	if !ok2 || m2.ID != "model-2" {
-		t.Error("gw2 should have model-2")
-	}
-
-	_, ok1 = gw1.Catalog.Get("faux", "model-2")
-	_, ok2 = gw2.Catalog.Get("faux", "model-1")
-	if ok1 || ok2 {
-		t.Error("models should not leak between gateway instances")
-	}
 }
 
 // TestL1CredentialProvider verifies the credential provider interface.
@@ -119,53 +97,13 @@ func TestL1CredentialProvider(t *testing.T) {
 	}
 }
 
-// TestL1ModelCatalog verifies programmatic-only model catalog.
-func TestL1ModelCatalog(t *testing.T) {
-	catalog := gateway.NewModelCatalog()
-
-	model := protocol.ModelDescriptor{
-		ID:            "claude-sonnet-4",
-		Name:          "Claude Sonnet 4",
-		API:           protocol.ApiAnthropicMessages,
-		Provider:      protocol.ProviderAnthropic,
-		BaseURL:       "https://api.anthropic.com",
-		Cost:          protocol.CostRates{Input: 3.0, Output: 15.0, CacheRead: 0.3, CacheWrite: 3.75},
-		ContextWindow: 200000,
-		MaxTokens:     64000,
-	}
-
-	catalog.Register(protocol.ProviderAnthropic, model)
-
-	got, ok := catalog.Get(protocol.ProviderAnthropic, "claude-sonnet-4")
-	if !ok || got.ID != "claude-sonnet-4" {
-		t.Error("should find registered model")
-	}
-
-	models := catalog.List()
-	if len(models) != 1 {
-		t.Errorf("expected 1 model, got %d", len(models))
-	}
-
-	usage := protocol.Usage{Input: 1000000, Output: 500000}
-	cost := catalog.CalculateCost(model, usage)
-	if cost.Input != 3.0 || cost.Output != 7.5 {
-		t.Errorf("unexpected cost: %+v", cost)
-	}
-
-	catalog.Unregister(protocol.ProviderAnthropic, "claude-sonnet-4")
-	_, ok = catalog.Get(protocol.ProviderAnthropic, "claude-sonnet-4")
-	if ok {
-		t.Error("model should be unregistered")
-	}
-}
-
 // TestL1FauxProviderStreaming verifies the FauxProvider streams correctly.
 func TestL1FauxProviderStreaming(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello, world!"},
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{Text: "Hello, world!"},
 	)
 
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := gatewaytest.FauxModel()
 	ctx := context.Background()
 	pctx := protocol.Context{
 		SystemPrompt: "You are helpful.",
@@ -247,11 +185,11 @@ func TestL2ToolExecutionPolicy(t *testing.T) {
 
 // TestL3AgentBasic verifies basic agent lifecycle.
 func TestL3AgentBasic(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello! I am a helpful assistant."},
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{Text: "Hello! I am a helpful assistant."},
 	)
 
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -306,16 +244,16 @@ func TestL3AgentWithTools(t *testing.T) {
 		},
 	}
 
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{
 			ToolCalls: []protocol.ToolCall{
 				{Type: "toolCall", ID: "tc1", Name: "read_file", Arguments: `{"path":"/tmp/test.txt"}`},
 			},
 		},
-		gateway.FauxResponse{Text: "I read the file. It contains: file contents here"},
+		gatewaytest.FauxResponse{Text: "I read the file. It contains: file contents here"},
 	)
 
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -350,19 +288,9 @@ func TestL3CompactionPrimitives(t *testing.T) {
 		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "message 3"}}, Timestamp: time.Now()},
 	}
 
-	tokens := agent.EstimateTokens(messages)
-	if tokens <= 0 {
-		t.Error("expected positive token estimate")
-	}
-
-	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 100000}
-	should := agent.ShouldCompact(messages, settings, protocol.ModelDescriptor{ContextWindow: 128000})
-	if should {
-		t.Error("small messages should not need compaction")
-	}
-
-	tokensAfter := agent.EstimateTokens(messages[2:]) + len("Summary of messages 1-2")/4
-	compacted, err := agent.CompactMessages(messages, "Summary of messages 1-2", 2, tokens, tokensAfter, nil)
+	tokensBefore := 100
+	tokensAfter := 40
+	compacted, err := agent.CompactMessages(messages, "Summary of messages 1-2", 2, tokensBefore, tokensAfter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,43 +305,10 @@ func TestL3CompactionPrimitives(t *testing.T) {
 	}
 }
 
-// TestL3MessageRegistry verifies the message registry.
-func TestL3MessageRegistry(t *testing.T) {
-	registry := agent.NewMessageRegistry()
-
-	roles := registry.Roles()
-	if len(roles) < 4 {
-		t.Errorf("expected at least 4 built-in roles, got %d: %v", len(roles), roles)
-	}
-
-	userMsg := protocol.UserMessage{
-		Role:      "user",
-		Content:   []protocol.Content{protocol.TextContent{Type: "text", Text: "hello"}},
-		Timestamp: time.Now(),
-	}
-	converted := registry.Convert(userMsg)
-	if converted == nil {
-		t.Error("user message should not be filtered")
-	}
-
-	registry.Register("notification", func(msg protocol.Message) *protocol.Message {
-		return nil
-	})
-
-	messages := []protocol.Message{
-		userMsg,
-		protocol.CompactSummaryMessage{Role: "compactSummary", Summary: "test", Timestamp: time.Now()},
-	}
-	result := registry.ConvertAll(messages)
-	if len(result) != 2 {
-		t.Errorf("expected 2 messages (user + compact summary as user), got %d", len(result))
-	}
-}
-
 // TestL3AgentCompact verifies Agent.Compact() emits events.
 func TestL3AgentCompact(t *testing.T) {
-	gw := gateway.NewFauxGateway()
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	gw := gatewaytest.NewFauxGateway()
+	model := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -439,7 +334,7 @@ func TestL3AgentCompact(t *testing.T) {
 	})
 	defer unsub()
 
-	err := ag.Compact("Summary of old conversation", 2, 100, nil)
+	err := ag.Compact("Summary of old conversation", 2, 100, 40)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -459,11 +354,11 @@ func TestL3AgentCompact(t *testing.T) {
 
 // TestL3AgentAbort verifies agent abort.
 func TestL3AgentAbort(t *testing.T) {
-	gw := gateway.NewFauxGateway(
-		gateway.FauxResponse{Text: "Hello!", StreamDelay: 100 * time.Millisecond},
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{Text: "Hello!", StreamDelay: 100 * time.Millisecond},
 	)
 
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	model := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -494,8 +389,8 @@ func TestL3AgentAbort(t *testing.T) {
 
 // TestL3AgentQueues verifies steering and follow-up queues.
 func TestL3AgentQueues(t *testing.T) {
-	gw := gateway.NewFauxGateway()
-	model, _ := gw.Catalog.Get("faux", "faux-model")
+	gw := gatewaytest.NewFauxGateway()
+	model := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -523,8 +418,8 @@ func TestL3AgentQueues(t *testing.T) {
 
 // TestL3AgentSetState verifies runtime state mutations.
 func TestL3AgentSetState(t *testing.T) {
-	gw := gateway.NewFauxGateway()
-	model1, _ := gw.Catalog.Get("faux", "faux-model")
+	gw := gatewaytest.NewFauxGateway()
+	model1 := gatewaytest.FauxModel()
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{
@@ -563,5 +458,26 @@ func TestL3AgentSetState(t *testing.T) {
 	ag.Reset()
 	if len(ag.State().Messages) != 0 {
 		t.Error("messages should be cleared after reset")
+	}
+}
+
+func TestL3AgentCompactOutOfRangeReturnsError(t *testing.T) {
+	gw := gatewaytest.NewFauxGateway()
+	model := gatewaytest.FauxModel()
+	ag := agent.NewAgent(agent.AgentConfig{
+		InitialState: &agent.AgentState{
+			Model: model,
+			Messages: []protocol.Message{
+				protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "hello"}}, Timestamp: time.Now()},
+			},
+		},
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			return gw.Stream(ctx, m, pctx, opts)
+		},
+	})
+
+	err := ag.Compact("summary", 3, 10, 5)
+	if err == nil {
+		t.Fatal("expected error for out-of-range firstKeptIndex")
 	}
 }

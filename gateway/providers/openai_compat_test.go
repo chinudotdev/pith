@@ -22,6 +22,11 @@ func newTestProvider() *OpenAICompatProvider {
 	})
 }
 
+type failingReadCloser struct{}
+
+func (failingReadCloser) Read([]byte) (int, error) { return 0, fmt.Errorf("read boom") }
+func (failingReadCloser) Close() error             { return nil }
+
 // --- buildRequest tests ---
 
 func TestBuildRequest_UsageStreamOptions(t *testing.T) {
@@ -31,7 +36,7 @@ func TestBuildRequest_UsageStreamOptions(t *testing.T) {
 		BaseURL: "https://api.openai.com",
 		Capabilities: gateway.ProviderCapabilities{
 			SupportsUsageInStreaming: true,
-			MaxTokensField:          gateway.MaxTokensCompletion,
+			MaxTokensField:           gateway.MaxTokensCompletion,
 		},
 	})
 
@@ -56,7 +61,7 @@ func TestBuildRequest_NoStreamOptionsWithoutCapability(t *testing.T) {
 		BaseURL: "https://api.openai.com",
 		Capabilities: gateway.ProviderCapabilities{
 			SupportsUsageInStreaming: false,
-			MaxTokensField:          gateway.MaxTokensLegacy, // non-zero to avoid auto-defaults
+			MaxTokensField:           gateway.MaxTokensLegacy, // non-zero to avoid auto-defaults
 		},
 	})
 
@@ -504,5 +509,129 @@ func TestStream_ContextPassedToHTTPRequest(t *testing.T) {
 		case <-deadline:
 			t.Fatal("stream did not close within 2s after context cancellation")
 		}
+	}
+}
+
+func TestContentToOpenAIToolResultStripsImages(t *testing.T) {
+	content := []protocol.Content{
+		protocol.TextContent{Type: "text", Text: "ok"},
+		protocol.ImageContent{Type: "image", MimeType: "image/png", Data: "abc"},
+	}
+	converted := contentToOpenAIToolResult(content)
+	switch v := converted.(type) {
+	case string:
+		if v != "ok" {
+			t.Fatalf("expected stripped text value, got %q", v)
+		}
+	case []map[string]any:
+		if len(v) != 1 || v[0]["type"] != "text" {
+			t.Fatalf("expected one text part, got %#v", v)
+		}
+	default:
+		t.Fatalf("unexpected converted type: %T", converted)
+	}
+}
+
+func TestMapHTTPStatusMappings(t *testing.T) {
+	tests := []struct {
+		status int
+		want   protocol.ErrorCode
+	}{
+		{status: 400, want: protocol.ErrInvalid},
+		{status: 401, want: protocol.ErrAuth},
+		{status: 403, want: protocol.ErrAuth},
+		{status: 408, want: protocol.ErrTimeout},
+		{status: 422, want: protocol.ErrInvalid},
+		{status: 429, want: protocol.ErrRateLimited},
+		{status: 500, want: protocol.ErrUnknown},
+	}
+	for _, tt := range tests {
+		if got := mapHTTPStatus(tt.status); got != tt.want {
+			t.Fatalf("status=%d got=%s want=%s", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestParseSSEStreamThinkingAccumulation(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"choices":[{"delta":{"reasoning_content":"step "}}]}`,
+		`data: {"choices":[{"delta":{"reasoning_content":"one"}}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	p := newTestProvider()
+	model := protocol.ModelDescriptor{ID: "gpt-4o", API: protocol.ApiOpenAICompletions, Provider: "openai"}
+	ch, err := p.parseSSEStream(context.Background(), io.NopCloser(strings.NewReader(sseData)), model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var thinkingDeltas int
+	var doneMsg *protocol.AssistantMessage
+	for event := range ch {
+		if event.Type == protocol.EventThinkingDelta {
+			thinkingDeltas++
+		}
+		if event.Type == protocol.EventDone {
+			doneMsg = event.Message
+		}
+	}
+	if thinkingDeltas == 0 {
+		t.Fatal("expected thinking delta events")
+	}
+	if doneMsg == nil {
+		t.Fatal("expected done message")
+	}
+	hasThinking := false
+	for _, block := range doneMsg.Content {
+		if tc, ok := block.(protocol.ThinkingContent); ok {
+			hasThinking = true
+			if tc.Thinking != "step one" {
+				t.Fatalf("unexpected accumulated thinking: %q", tc.Thinking)
+			}
+		}
+	}
+	if !hasThinking {
+		t.Fatal("expected thinking content in final message")
+	}
+}
+
+func TestParseSSEStreamOversizedLineEmitsError(t *testing.T) {
+	// Exceed the configured 1MB scanner max token size.
+	oversized := strings.Repeat("a", 1024*1024+16)
+	sseData := "data: " + oversized + "\n"
+	p := newTestProvider()
+	model := protocol.ModelDescriptor{ID: "gpt-4o", API: protocol.ApiOpenAICompletions, Provider: "openai"}
+	ch, err := p.parseSSEStream(context.Background(), io.NopCloser(strings.NewReader(sseData)), model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var gotError bool
+	for event := range ch {
+		if event.Type == protocol.EventError {
+			gotError = true
+		}
+	}
+	if !gotError {
+		t.Fatal("expected EventError for oversized SSE line")
+	}
+}
+
+func TestParseSSEStreamScannerErrorEmitsError(t *testing.T) {
+	p := newTestProvider()
+	model := protocol.ModelDescriptor{ID: "gpt-4o", API: protocol.ApiOpenAICompletions, Provider: "openai"}
+	ch, err := p.parseSSEStream(context.Background(), failingReadCloser{}, model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var gotError bool
+	for event := range ch {
+		if event.Type == protocol.EventError {
+			gotError = true
+		}
+	}
+	if !gotError {
+		t.Fatal("expected EventError when scanner fails")
 	}
 }

@@ -6,7 +6,7 @@ import "time"
 
 // TextContent represents a text block in any message.
 type TextContent struct {
-	Type          string `json:"type"`                     // always "text"
+	Type          string `json:"type"` // always "text"
 	Text          string `json:"text"`
 	TextSignature string `json:"textSignature,omitempty"` // Anthropic signature
 }
@@ -36,10 +36,10 @@ type ThinkingContent struct {
 
 // ToolCall represents a tool invocation request from the model.
 type ToolCall struct {
-	Type            string `json:"type"` // always "toolCall"
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Arguments       string `json:"arguments"` // JSON string
+	Type             string `json:"type"` // always "toolCall"
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"` // JSON string
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
@@ -91,19 +91,11 @@ type ToolResultMessage struct {
 
 // CompactSummaryMessage replaces old messages after compaction.
 type CompactSummaryMessage struct {
-	Role         string        `json:"role"` // always "compactSummary"
-	Summary      string        `json:"summary"`
-	TokensBefore int           `json:"tokensBefore"`
-	TokensAfter  int           `json:"tokensAfter"`
-	FileOps      *FileOperations `json:"fileOps,omitempty"`
-	Timestamp    time.Time     `json:"timestamp"`
-}
-
-// FileOperations tracks which files were read/written/edited during a conversation.
-type FileOperations struct {
-	Read    []string `json:"read"`
-	Written []string `json:"written"`
-	Edited  []string `json:"edited"`
+	Role         string    `json:"role"` // always "compactSummary"
+	Summary      string    `json:"summary"`
+	TokensBefore int       `json:"tokensBefore"`
+	TokensAfter  int       `json:"tokensAfter"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 // Message is the union of all message types.
@@ -111,7 +103,7 @@ type Message interface {
 	messageRole() string
 }
 
-func (UserMessage) messageRole() string          { return "user" }
-func (AssistantMessage) messageRole() string     { return "assistant" }
-func (ToolResultMessage) messageRole() string    { return "toolResult" }
+func (UserMessage) messageRole() string           { return "user" }
+func (AssistantMessage) messageRole() string      { return "assistant" }
+func (ToolResultMessage) messageRole() string     { return "toolResult" }
 func (CompactSummaryMessage) messageRole() string { return "compactSummary" }

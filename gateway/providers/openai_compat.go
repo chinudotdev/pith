@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/chinudotdev/pith/gateway"
@@ -67,8 +66,6 @@ func NewOpenAICompatProvider(cfg OpenAICompatConfig) *OpenAICompatProvider {
 	if cfg.Capabilities == (gateway.ProviderCapabilities{}) {
 		caps.MaxTokensField = gateway.MaxTokensCompletion
 		caps.SupportsUsageInStreaming = true
-		caps.CacheControlFormat = gateway.CacheControlNone
-		caps.SupportsTemperature = true
 	}
 
 	client := cfg.HTTPClient
@@ -174,10 +171,6 @@ func (p *OpenAICompatProvider) buildRequest(model protocol.ModelDescriptor, ctx 
 						content = append(content, map[string]any{"type": "thinking", "thinking": b.Thinking})
 					}
 				case protocol.ToolCall:
-					var args any
-					if err := json.Unmarshal([]byte(b.Arguments), &args); err != nil {
-						args = b.Arguments
-					}
 					toolCalls = append(toolCalls, map[string]any{
 						"id": b.ID, "type": "function", "function": map[string]any{
 							"name": b.Name, "arguments": b.Arguments,
@@ -201,7 +194,7 @@ func (p *OpenAICompatProvider) buildRequest(model protocol.ModelDescriptor, ctx 
 				entry["name"] = m.ToolName
 			}
 			entry["tool_call_id"] = m.ToolCallID
-			entry["content"] = contentToOpenAI(m.Content)
+			entry["content"] = contentToOpenAIToolResult(m.Content)
 			messages = append(messages, entry)
 
 		case protocol.CompactSummaryMessage:
@@ -266,20 +259,8 @@ func (p *OpenAICompatProvider) buildRequest(model protocol.ModelDescriptor, ctx 
 func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadCloser, model protocol.ModelDescriptor) (<-chan protocol.StreamEvent, error) {
 	ch := make(chan protocol.StreamEvent, 64)
 
-	// Ensure body is closed exactly once, whether by normal completion
-	// or by context cancellation.
-	var closeBody sync.Once
-	doClose := func() { closeBody.Do(func() { body.Close() }) }
-
-	// When the context is cancelled, close the response body to unblock
-	// the scanner. This ensures streaming stops promptly on abort.
 	go func() {
-		<-ctx.Done()
-		doClose()
-	}()
-
-	go func() {
-		defer doClose()
+		defer body.Close()
 		defer close(ch)
 
 		partial := &protocol.AssistantMessage{
@@ -305,6 +286,10 @@ func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadC
 		ch <- protocol.StreamEvent{Type: protocol.EventStart, Partial: snapshotPartial()}
 
 		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		thinkingStarted := false
+		thinkingContentIndex := -1
+		var accumulatedThinking strings.Builder
 		for scanner.Scan() {
 			// Check for context cancellation between reads
 			select {
@@ -339,6 +324,19 @@ func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadC
 					ch <- protocol.StreamEvent{
 						Type: protocol.EventToolCallEnd, ContentIndex: len(partial.Content) - 1,
 						ToolCall: &toolCalls[i], Partial: snapshotPartial(),
+					}
+				}
+
+				if thinkingStarted {
+					partial.Content = append(partial.Content, protocol.ThinkingContent{
+						Type:     "thinking",
+						Thinking: accumulatedThinking.String(),
+					})
+					ch <- protocol.StreamEvent{
+						Type:         protocol.EventThinkingEnd,
+						ContentIndex: thinkingContentIndex,
+						Content:      accumulatedThinking.String(),
+						Partial:      snapshotPartial(),
 					}
 				}
 
@@ -419,8 +417,18 @@ func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadC
 
 				// Reasoning content
 				if choice.Delta.ReasoningContent != "" {
+					if !thinkingStarted {
+						thinkingContentIndex = len(partial.Content)
+						thinkingStarted = true
+						ch <- protocol.StreamEvent{
+							Type:         protocol.EventThinkingStart,
+							ContentIndex: thinkingContentIndex,
+							Partial:      snapshotPartial(),
+						}
+					}
+					accumulatedThinking.WriteString(choice.Delta.ReasoningContent)
 					ch <- protocol.StreamEvent{
-						Type: protocol.EventThinkingDelta, ContentIndex: len(partial.Content),
+						Type: protocol.EventThinkingDelta, ContentIndex: thinkingContentIndex,
 						Delta: choice.Delta.ReasoningContent, Partial: snapshotPartial(),
 					}
 				}
@@ -437,6 +445,22 @@ func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadC
 				Type:    protocol.EventError,
 				Reason:  protocol.StopAborted,
 				Message: snapshotPartial(),
+			}
+			return
+		}
+
+		if err := scanner.Err(); err != nil {
+			ch <- protocol.StreamEvent{
+				Type: protocol.EventError,
+				Message: &protocol.AssistantMessage{
+					Role:         "assistant",
+					API:          model.API,
+					Provider:     model.Provider,
+					Model:        model.ID,
+					ErrorMessage: fmt.Sprintf("failed to parse SSE stream: %v", err),
+					StopReason:   protocol.StopError,
+					Timestamp:    protocol.Now(),
+				},
 			}
 			return
 		}
@@ -533,6 +557,17 @@ func contentToOpenAI(content []protocol.Content) any {
 	return parts
 }
 
+func contentToOpenAIToolResult(content []protocol.Content) any {
+	filtered := make([]protocol.Content, 0, len(content))
+	for _, c := range content {
+		if _, ok := c.(protocol.ImageContent); ok {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	return contentToOpenAI(filtered)
+}
+
 func mapFinishReason(reason string) protocol.StopReason {
 	switch reason {
 	case "stop":
@@ -550,12 +585,16 @@ func mapHTTPStatus(status int) protocol.ErrorCode {
 	switch {
 	case status == 401 || status == 403:
 		return protocol.ErrAuth
+	case status == 400 || status == 422:
+		return protocol.ErrInvalid
+	case status == 408:
+		return protocol.ErrTimeout
 	case status == 404:
 		return protocol.ErrNotFound
 	case status == 429:
 		return protocol.ErrRateLimited
 	case status >= 500:
-		return protocol.ErrTimeout
+		return protocol.ErrUnknown
 	default:
 		return protocol.ErrUnknown
 	}

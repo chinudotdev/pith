@@ -10,22 +10,22 @@ import (
 
 // AgentTool extends the protocol Tool with execution behavior.
 type AgentTool struct {
-	Name        string         `json:"name"`
-	Label       string         `json:"label"`
-	Description string         `json:"description"`
-	Parameters  any            `json:"parameters"` // JSON Schema
-	Execute     ToolExecutor   `json:"-"`
+	Name        string                                           `json:"name"`
+	Label       string                                           `json:"label"`
+	Description string                                           `json:"description"`
+	Parameters  any                                              `json:"parameters"` // JSON Schema
+	Execute     ToolExecutor                                     `json:"-"`
 	PrepareArgs func(raw map[string]any) (map[string]any, error) `json:"-"`
-	Mode        ExecutionMode  `json:"mode,omitempty"` // overrides default policy
+	Mode        ExecutionMode                                    `json:"mode,omitempty"` // overrides default policy
 }
 
 // ExecutionMode controls whether a tool runs sequentially or in parallel.
 type ExecutionMode int
 
 const (
-	ModeDefault   ExecutionMode = iota // use the LoopConfig policy
-	ModeSequential                     // always sequential
-	ModeParallel                       // always parallel
+	ModeDefault    ExecutionMode = iota // use the LoopConfig policy
+	ModeSequential                      // always sequential
+	ModeParallel                        // always parallel
 )
 
 // ToolExecutor is the function signature for tool execution.
@@ -57,8 +57,8 @@ func (ParallelPolicy) IsParallel(_ string) bool { return true }
 
 // PerToolPolicy allows per-tool overrides.
 type PerToolPolicy struct {
-	Default   bool                // true = parallel, false = sequential
-	Overrides map[string]bool     // tool name -> isParallel
+	Default   bool            // true = parallel, false = sequential
+	Overrides map[string]bool // tool name -> isParallel
 }
 
 func (p *PerToolPolicy) IsParallel(toolName string) bool {
@@ -115,17 +115,17 @@ type PrepareNextTurnContext = ShouldStopAfterTurnContext
 
 // TurnUpdate allows modifying the context for the next turn.
 type TurnUpdate struct {
-	Context      *AgentContext    `json:"context,omitempty"`
-	Model        *protocol.ModelDescriptor `json:"model,omitempty"`
-	ThinkingLevel protocol.ThinkingLevel `json:"thinkingLevel,omitempty"`
+	Context       *AgentContext             `json:"context,omitempty"`
+	Model         *protocol.ModelDescriptor `json:"model,omitempty"`
+	ThinkingLevel protocol.ThinkingLevel    `json:"thinkingLevel,omitempty"`
 }
 
 // LoopHooks are callbacks that the loop calls at specific points.
 type LoopHooks struct {
-	BeforeToolCall     func(ctx BeforeToolCallContext, signal <-chan struct{}) *BeforeToolCallResult
-	AfterToolCall      func(ctx AfterToolCallContext, signal <-chan struct{}) *AfterToolCallResult
+	BeforeToolCall      func(ctx BeforeToolCallContext, signal <-chan struct{}) *BeforeToolCallResult
+	AfterToolCall       func(ctx AfterToolCallContext, signal <-chan struct{}) *AfterToolCallResult
 	ShouldStopAfterTurn func(ctx ShouldStopAfterTurnContext) bool
-	PrepareNextTurn    func(ctx PrepareNextTurnContext) *TurnUpdate
+	PrepareNextTurn     func(ctx PrepareNextTurnContext) *TurnUpdate
 }
 
 // --- Agent Context ---
@@ -141,18 +141,19 @@ type AgentContext struct {
 
 // LoopConfig configures a single run of the agent loop.
 type LoopConfig struct {
-	Model         protocol.ModelDescriptor
-	ThinkingLevel protocol.ThinkingLevel
-	Tools         []AgentTool
-	StreamFn      StreamFn
-	ConvertToLlm  MessageTransformer
-	ToolExecution ToolExecutionPolicy
-	Hooks         LoopHooks
-	SessionID     string
-	ThinkingBudgets *protocol.ThinkingBudgets
-	Transport     protocol.Transport
+	Model           protocol.ModelDescriptor
+	ThinkingLevel   protocol.ThinkingLevel
+	Temperature     *float64
+	MaxTokens       *int
+	Tools           []AgentTool
+	StreamFn        StreamFn
+	ConvertToLlm    MessageTransformer
+	ToolExecution   ToolExecutionPolicy
+	Hooks           LoopHooks
+	SessionID       string
+	Transport       protocol.Transport
 	MaxRetryDelayMs *int
-	ErrorChannel  ErrorChannel
+	ErrorChannel    ErrorChannel
 
 	// SteeringDrain returns messages to inject after the current assistant turn.
 	// Called between turns. Return nil/empty to continue normally.
@@ -309,18 +310,18 @@ const (
 
 // LoopEvent represents a single event emitted by the agent loop.
 type LoopEvent struct {
-	Type         LoopEventType
-	Message      protocol.Message   // for MessageStart, MessageEnd
-	StreamEvent  *protocol.StreamEvent // for MessageUpdate
-	ToolCallID   string             // for ToolExecution*
-	ToolName     string             // for ToolExecution*
-	Args         any                // for ToolExecutionStart, ToolExecutionUpdate
-	Result       any                // for ToolExecutionEnd
-	IsError      bool               // for ToolExecutionEnd
-	PartialResult any              // for ToolExecutionUpdate
-	Messages     []protocol.Message // for AgentEnd
-	Assistant    *protocol.AssistantMessage // for TurnEnd
-	ToolResults  []protocol.ToolResultMessage // for TurnEnd
+	Type          LoopEventType
+	Message       protocol.Message             // for MessageStart, MessageEnd
+	StreamEvent   *protocol.StreamEvent        // for MessageUpdate
+	ToolCallID    string                       // for ToolExecution*
+	ToolName      string                       // for ToolExecution*
+	Args          any                          // for ToolExecutionStart, ToolExecutionUpdate
+	Result        any                          // for ToolExecutionEnd
+	IsError       bool                         // for ToolExecutionEnd
+	PartialResult any                          // for ToolExecutionUpdate
+	Messages      []protocol.Message           // for AgentEnd
+	Assistant     *protocol.AssistantMessage   // for TurnEnd
+	ToolResults   []protocol.ToolResultMessage // for TurnEnd
 }
 
 // EventSink receives loop events.

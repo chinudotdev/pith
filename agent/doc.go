@@ -15,8 +15,8 @@
 //   - AgentState: model, system prompt, thinking level, tools, messages
 //   - EventBus: typed subscribe/unsubscribe event dispatch
 //   - MessageQueue: steering + follow-up queues with DrainAll/DrainOne modes
-//   - MessageRegistry: runtime message type conversion
-//   - Compaction: EstimateTokens, ShouldCompact, CompactMessages, Agent.Compact
+//   - DefaultConvertToLlm: default message conversion for loop runs
+//   - Compaction: CompactMessages, Agent.Compact
 //
 // Layer map:
 //

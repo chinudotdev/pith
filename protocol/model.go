@@ -13,26 +13,26 @@ type Tool struct {
 
 // ModelDescriptor fully describes a model available through the gateway.
 type ModelDescriptor struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	API          ApiId             `json:"api"`
-	Provider     ProviderId        `json:"provider"`
-	BaseURL      string            `json:"baseUrl"`
-	Capabilities ModelCapabilities `json:"capabilities"`
-	Cost         CostRates         `json:"cost"`
-	ContextWindow int              `json:"contextWindow"`
-	MaxTokens    int               `json:"maxTokens"`
-	Headers      map[string]string `json:"headers,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	API           ApiId             `json:"api"`
+	Provider      ProviderId        `json:"provider"`
+	BaseURL       string            `json:"baseUrl"`
+	Capabilities  ModelCapabilities `json:"capabilities"`
+	Cost          CostRates         `json:"cost"`
+	ContextWindow int               `json:"contextWindow"`
+	MaxTokens     int               `json:"maxTokens"`
+	Headers       map[string]string `json:"headers,omitempty"`
 }
 
 // ModelCapabilities describes what a model can do.
 type ModelCapabilities struct {
-	Input          map[MediaType]bool `json:"input"`
-	Thinking       bool               `json:"thinking"`
-	ThinkingLevels map[ThinkingLevel]bool `json:"thinkingLevels"`
-	DefaultThinkingLevel ThinkingLevel `json:"defaultThinkingLevel,omitempty"` // model's default when ThinkingLevel is not explicitly set
-	Caching        map[CacheMode]bool `json:"caching"`
-	Transport      map[Transport]bool `json:"transport"`
+	Input                map[MediaType]bool     `json:"input"`
+	Thinking             bool                   `json:"thinking"`
+	ThinkingLevels       map[ThinkingLevel]bool `json:"thinkingLevels"`
+	DefaultThinkingLevel ThinkingLevel          `json:"defaultThinkingLevel,omitempty"` // model's default when ThinkingLevel is not explicitly set
+	Caching              map[CacheMode]bool     `json:"caching"`
+	Transport            map[Transport]bool     `json:"transport"`
 }
 
 // CostRates describes per-token pricing in dollars per million tokens.
@@ -47,12 +47,12 @@ type CostRates struct {
 
 // Usage tracks token consumption for a single request.
 type Usage struct {
-	Input       int     `json:"input"`
-	Output      int     `json:"output"`
-	CacheRead   int     `json:"cacheRead"`
-	CacheWrite  int     `json:"cacheWrite"`
-	TotalTokens int     `json:"totalTokens"`
-	Cost        Cost    `json:"cost"`
+	Input       int  `json:"input"`
+	Output      int  `json:"output"`
+	CacheRead   int  `json:"cacheRead"`
+	CacheWrite  int  `json:"cacheWrite"`
+	TotalTokens int  `json:"totalTokens"`
+	Cost        Cost `json:"cost"`
 }
 
 // Cost tracks dollar amounts for a single request.

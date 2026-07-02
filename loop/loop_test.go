@@ -2,6 +2,7 @@ package loop_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -162,5 +163,114 @@ func TestLoopAbortCancelsStreamFn(t *testing.T) {
 	case <-loopDone:
 	case <-time.After(2 * time.Second):
 		t.Error("loop should finish after context cancellation")
+	}
+}
+
+func TestProviderAbortWithoutContextCancellationReturnsError(t *testing.T) {
+	model := testModel()
+	streamFn := func(ctx context.Context, m protocol.ModelDescriptor, _ protocol.Context, _ protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		ch := make(chan protocol.StreamEvent, 2)
+		go func() {
+			defer close(ch)
+			ch <- protocol.StreamEvent{Type: protocol.EventStart}
+			ch <- protocol.StreamEvent{
+				Type:   protocol.EventError,
+				Reason: protocol.StopAborted,
+				Message: &protocol.AssistantMessage{
+					Role:         "assistant",
+					ErrorMessage: "provider aborted",
+				},
+			}
+		}()
+		return ch, nil
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "hi"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, loop.LoopConfig{Model: model, StreamFn: streamFn}, func(event loop.LoopEvent) {})
+	if err == nil {
+		t.Fatal("expected non-nil error when provider emits StopAborted")
+	}
+}
+
+func TestNonAbortProviderErrorReturnsError(t *testing.T) {
+	model := testModel()
+	streamFn := func(ctx context.Context, m protocol.ModelDescriptor, _ protocol.Context, _ protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		ch := make(chan protocol.StreamEvent, 2)
+		go func() {
+			defer close(ch)
+			ch <- protocol.StreamEvent{Type: protocol.EventStart}
+			ch <- protocol.StreamEvent{
+				Type:   protocol.EventError,
+				Reason: protocol.StopError,
+				Message: &protocol.AssistantMessage{
+					Role:         "assistant",
+					ErrorMessage: "provider failed",
+				},
+			}
+		}()
+		return ch, nil
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "hi"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, loop.LoopConfig{Model: model, StreamFn: streamFn}, func(event loop.LoopEvent) {})
+	if err == nil {
+		t.Fatal("expected non-nil error when provider emits EventError")
+	}
+}
+
+func TestSteeringDuringTextTurnContinuesInnerLoop(t *testing.T) {
+	model := testModel()
+	callCount := 0
+	streamFn := func(ctx context.Context, m protocol.ModelDescriptor, _ protocol.Context, _ protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		callCount++
+		ch := make(chan protocol.StreamEvent, 4)
+		go func() {
+			defer close(ch)
+			ch <- protocol.StreamEvent{Type: protocol.EventStart}
+			ch <- protocol.StreamEvent{Type: protocol.EventTextStart, ContentIndex: 0}
+			ch <- protocol.StreamEvent{Type: protocol.EventTextDelta, ContentIndex: 0, Delta: "ok"}
+			ch <- protocol.StreamEvent{
+				Type:   protocol.EventDone,
+				Reason: protocol.StopEnd,
+				Message: &protocol.AssistantMessage{
+					Role:       "assistant",
+					Content:    []protocol.ContentBlock{protocol.TextContent{Type: "text", Text: "ok"}},
+					StopReason: protocol.StopEnd,
+					Timestamp:  protocol.Now(),
+				},
+			}
+		}()
+		return ch, nil
+	}
+
+	steeringProvided := false
+	cfg := loop.LoopConfig{
+		Model:    model,
+		StreamFn: streamFn,
+		SteeringDrain: func() []protocol.Message {
+			if steeringProvided || callCount == 0 {
+				return nil
+			}
+			steeringProvided = true
+			return []protocol.Message{
+				protocol.UserMessage{
+					Role:      "user",
+					Content:   []protocol.Content{protocol.TextContent{Type: "text", Text: "steer"}},
+					Timestamp: protocol.Now(),
+				},
+			}
+		},
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "start"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, cfg, func(event loop.LoopEvent) {})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount < 2 {
+		t.Fatalf("expected inner loop to continue after steering; stream called %d times", callCount)
 	}
 }

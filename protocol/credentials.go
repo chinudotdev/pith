@@ -25,11 +25,11 @@ func (BearerToken) credentialType() string { return "bearerToken" }
 
 // AwsCredentials represents AWS credentials for Bedrock.
 type AwsCredentials struct {
-	Profile        string `json:"profile,omitempty"`
-	Region         string `json:"region"`
-	AccessKeyID    string `json:"accessKeyId,omitempty"`
+	Profile         string `json:"profile,omitempty"`
+	Region          string `json:"region"`
+	AccessKeyID     string `json:"accessKeyId,omitempty"`
 	SecretAccessKey string `json:"secretAccessKey,omitempty"`
-	BearerToken    string `json:"bearerToken,omitempty"`
+	BearerToken     string `json:"bearerToken,omitempty"`
 }
 
 func (AwsCredentials) credentialType() string { return "awsCredentials" }

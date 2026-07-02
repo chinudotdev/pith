@@ -1,4 +1,4 @@
-// Example 05: Compaction — EstimateTokens, ShouldCompact, CompactMessages, Agent.Compact().
+// Example 05: Compaction — CompactMessages and Agent.Compact().
 //
 //	mkdir my-agent && cd my-agent && go mod init my-agent
 //	cp main.go . && go mod tidy
@@ -28,7 +28,7 @@ func main() {
 		}
 		return protocol.ApiKey{Key: key}, nil
 	})
-	gw.Catalog.Register("openai", protocol.ModelDescriptor{
+	model := protocol.ModelDescriptor{
 		ID:            "gpt-4o-mini",
 		Name:          "GPT-4o Mini",
 		API:           protocol.ApiOpenAICompletions,
@@ -40,9 +40,7 @@ func main() {
 			Input:     map[protocol.MediaType]bool{protocol.MediaText: true},
 			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
-	})
-
-	model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
+	}
 
 	// Build a long conversation to compact.
 	messages := []protocol.Message{
@@ -56,19 +54,15 @@ func main() {
 		assistantMsg("The capital of Italy is Rome."),
 	}
 
-	// --- Compaction primitives ---
-	tokens := agent.EstimateTokens(messages)
-	fmt.Printf("Estimated tokens for %d messages: %d\n", len(messages), tokens)
-
-	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 20}
-	shouldCompact := agent.ShouldCompact(messages, settings, protocol.ModelDescriptor{ContextWindow: 100})
-	fmt.Printf("Should compact (context=100, reserve=20): %v\n", shouldCompact)
+	// --- Compaction primitive ---
+	tokensBefore := estimateTokens(messages)
+	fmt.Printf("Estimated tokens for %d messages: %d\n", len(messages), tokensBefore)
 
 	// Compact: keep only the last 2 messages.
 	summary := "User asked about capitals of France (Paris), Germany (Berlin), and Japan (Tokyo)."
 	firstKeptIndex := 6
-	tokensAfter := agent.EstimateTokens(messages[firstKeptIndex:]) + len(summary)/4
-	compacted, err := agent.CompactMessages(messages, summary, firstKeptIndex, tokens, tokensAfter, nil)
+	tokensAfter := estimateTokens(messages[firstKeptIndex:]) + len(summary)/4
+	compacted, err := agent.CompactMessages(messages, summary, firstKeptIndex, tokensBefore, tokensAfter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "compact failed: %v\n", err)
 		os.Exit(1)
@@ -95,7 +89,7 @@ func main() {
 	})
 
 	fmt.Printf("\nBefore compact: %d messages\n", len(ag.State().Messages))
-	err = ag.Compact("Discussed capitals of France, Germany, Japan", 6, tokens, nil)
+	err = ag.Compact("Discussed capitals of France, Germany, Japan", 6, tokensBefore, tokensAfter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent compact failed: %v\n", err)
 		os.Exit(1)
@@ -121,4 +115,33 @@ func assistantMsg(text string) protocol.Message {
 		Content:   []protocol.ContentBlock{protocol.TextContent{Type: "text", Text: text}},
 		Timestamp: protocol.Now(),
 	}
+}
+
+func estimateTokens(messages []protocol.Message) int {
+	chars := 0
+	for _, msg := range messages {
+		switch m := msg.(type) {
+		case protocol.UserMessage:
+			for _, c := range m.Content {
+				if tc, ok := c.(protocol.TextContent); ok {
+					chars += len(tc.Text)
+				}
+			}
+		case protocol.AssistantMessage:
+			for _, c := range m.Content {
+				if tc, ok := c.(protocol.TextContent); ok {
+					chars += len(tc.Text)
+				}
+			}
+		case protocol.ToolResultMessage:
+			for _, c := range m.Content {
+				if tc, ok := c.(protocol.TextContent); ok {
+					chars += len(tc.Text)
+				}
+			}
+		case protocol.CompactSummaryMessage:
+			chars += len(m.Summary)
+		}
+	}
+	return chars / 4
 }

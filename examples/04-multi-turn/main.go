@@ -30,7 +30,7 @@ func main() {
 		}
 		return protocol.ApiKey{Key: key}, nil
 	})
-	gw.Catalog.Register("openai", protocol.ModelDescriptor{
+	model := protocol.ModelDescriptor{
 		ID:            "gpt-4o-mini",
 		Name:          "GPT-4o Mini",
 		API:           protocol.ApiOpenAICompletions,
@@ -42,9 +42,7 @@ func main() {
 			Input:     map[protocol.MediaType]bool{protocol.MediaText: true},
 			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
-	})
-
-	model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
+	}
 
 	ag := agent.NewAgent(agent.AgentConfig{
 		InitialState: &agent.AgentState{

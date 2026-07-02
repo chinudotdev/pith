@@ -1,4 +1,4 @@
-// Example 10: Capability Negotiation & Tool Execution Policies.
+// Example 10: Tool execution policies and hooks.
 //
 //	mkdir my-agent && cd my-agent && go mod init my-agent
 //	cp main.go . && go mod tidy
@@ -32,7 +32,7 @@ func main() {
 		}
 		return protocol.ApiKey{Key: key}, nil
 	})
-	gw.Catalog.Register("openai", protocol.ModelDescriptor{
+	model := protocol.ModelDescriptor{
 		ID:            "gpt-4o-mini",
 		Name:          "GPT-4o Mini",
 		API:           protocol.ApiOpenAICompletions,
@@ -44,51 +44,10 @@ func main() {
 			Input:     map[protocol.MediaType]bool{protocol.MediaText: true, protocol.MediaImage: true},
 			Transport: map[protocol.Transport]bool{protocol.TransportSSE: true},
 		},
-	})
-
-	model, _ := gw.Catalog.Get("openai", "gpt-4o-mini")
-
-	// --- Capability Negotiation ---
-	fmt.Println("--- Capability Negotiation ---")
-
-	thinkingModel := protocol.ModelDescriptor{
-		ID:       "claude-sonnet-4",
-		Name:     "Claude Sonnet 4",
-		API:      protocol.ApiAnthropicMessages,
-		Provider: protocol.ProviderAnthropic,
-		Capabilities: protocol.ModelCapabilities{
-			Input:          map[protocol.MediaType]bool{protocol.MediaText: true, protocol.MediaImage: true},
-			Thinking:       true,
-			ThinkingLevels: map[protocol.ThinkingLevel]bool{protocol.ThinkingOff: true, protocol.ThinkingMedium: true, protocol.ThinkingHigh: true},
-			Caching:        map[protocol.CacheMode]bool{protocol.CacheNone: true, protocol.CacheShort: true},
-			Transport:      map[protocol.Transport]bool{protocol.TransportSSE: true, protocol.TransportWebSocket: true},
-		},
-		ContextWindow: 200000,
-		MaxTokens:     64000,
 	}
 
-	// Provider that supports thinking
-	anthropicCaps := gateway.ProviderCapabilities{
-		ThinkingFormat:        gateway.ThinkingString,
-		CacheControlFormat:    gateway.CacheControlAnthropic,
-		SupportsTemperature:   true,
-		ForceAdaptiveThinking: true,
-	}
-	result := gateway.Negotiate(thinkingModel, anthropicCaps)
-	fmt.Printf("Model: %s vs Anthropic provider: %d warnings, %d errors\n",
-		thinkingModel.ID, len(result.Warnings), len(result.Errors))
-	for _, w := range result.Warnings {
-		fmt.Printf("  ⚠ %s\n", w)
-	}
-
-	// Provider that does NOT support thinking
-	noThinkingProvider := gateway.ProviderCapabilities{CacheControlFormat: gateway.CacheControlNone}
-	result2 := gateway.Negotiate(thinkingModel, noThinkingProvider)
-	fmt.Printf("Model with thinking vs provider without: %d warnings, %d errors\n",
-		len(result2.Warnings), len(result2.Errors))
-	for _, w := range result2.Warnings {
-		fmt.Printf("  ⚠ %s\n", w)
-	}
+	fmt.Println("--- Capability negotiation moved out of core ---")
+	fmt.Println("Use pith-sdk for preflight capability negotiation helpers.")
 
 	// --- Tool Execution Policies ---
 	fmt.Println("\n--- Tool Execution Policies ---")

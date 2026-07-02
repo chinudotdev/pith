@@ -11,15 +11,13 @@ import (
 
 // AgentState holds the current state of the agent.
 type AgentState struct {
-	SystemPrompt     string
-	Model            protocol.ModelDescriptor
-	ThinkingLevel    *protocol.ThinkingLevel // nil = use model's DefaultThinkingLevel; non-nil = explicit (including "off")
-	Tools            []loop.AgentTool
-	Messages         []protocol.Message
-	IsStreaming       bool
-	StreamingMessage  *protocol.AssistantMessage
-	PendingToolCalls map[string]bool
-	LastError        error
+	SystemPrompt  string
+	Model         protocol.ModelDescriptor
+	ThinkingLevel *protocol.ThinkingLevel // nil = use model's DefaultThinkingLevel; non-nil = explicit (including "off")
+	Tools         []loop.AgentTool
+	Messages      []protocol.Message
+	IsStreaming   bool
+	LastError     error
 }
 
 // Copy returns a shallow copy of the state to prevent external mutation.
@@ -33,12 +31,6 @@ func (s *AgentState) Copy() AgentState {
 	copy(cp.Messages, s.Messages)
 	cp.Tools = make([]loop.AgentTool, len(s.Tools))
 	copy(cp.Tools, s.Tools)
-	if s.PendingToolCalls != nil {
-		cp.PendingToolCalls = make(map[string]bool, len(s.PendingToolCalls))
-		for k, v := range s.PendingToolCalls {
-			cp.PendingToolCalls[k] = v
-		}
-	}
 	return cp
 }
 
@@ -56,7 +48,6 @@ type CompactEvent struct {
 	FirstKeptID  string
 	TokensBefore int
 	TokensAfter  int
-	FileOps      *protocol.FileOperations
 }
 
 // Listener is a function that receives agent events.

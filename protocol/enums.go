@@ -16,10 +16,10 @@ const (
 type StopReason string
 
 const (
-	StopEnd    StopReason = "stop"     // Natural end
-	StopLength StopReason = "length"   // Hit max tokens
-	StopTool   StopReason = "toolUse"  // Wants to call a tool
-	StopError  StopReason = "error"    // Error occurred
+	StopEnd     StopReason = "stop"    // Natural end
+	StopLength  StopReason = "length"  // Hit max tokens
+	StopTool    StopReason = "toolUse" // Wants to call a tool
+	StopError   StopReason = "error"   // Error occurred
 	StopAborted StopReason = "aborted" // Aborted by user
 )
 
@@ -28,18 +28,14 @@ type CacheMode string
 
 const (
 	CacheNone CacheMode = "none"
-	CacheShort CacheMode = "short"
-	CacheLong  CacheMode = "long"
 )
 
 // Transport controls the streaming transport protocol.
 type Transport string
 
 const (
-	TransportSSE             Transport = "sse"
-	TransportWebSocket       Transport = "websocket"
-	TransportWebSocketCached Transport = "websocket-cached"
-	TransportAuto            Transport = "auto"
+	TransportSSE  Transport = "sse"
+	TransportAuto Transport = "auto"
 )
 
 // MediaType describes input/output media types a model supports.

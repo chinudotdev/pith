@@ -19,17 +19,18 @@ type QueueConfig struct {
 
 // AgentConfig configures the creation of an Agent.
 type AgentConfig struct {
-	InitialState   *AgentState
-	StreamFn       loop.StreamFn
-	ConvertToLlm   loop.MessageTransformer
-	QueueConfig    *QueueConfig
-	SessionID      string
-	ThinkingBudgets *protocol.ThinkingBudgets
-	Transport      protocol.Transport
+	InitialState    *AgentState
+	StreamFn        loop.StreamFn
+	ConvertToLlm    loop.MessageTransformer
+	QueueConfig     *QueueConfig
+	SessionID       string
+	Temperature     *float64
+	MaxTokens       *int
+	Transport       protocol.Transport
 	MaxRetryDelayMs *int
-	ToolExecution  loop.ToolExecutionPolicy
-	BeforeToolCall func(ctx loop.BeforeToolCallContext, signal <-chan struct{}) *loop.BeforeToolCallResult
-	AfterToolCall  func(ctx loop.AfterToolCallContext, signal <-chan struct{}) *loop.AfterToolCallResult
+	ToolExecution   loop.ToolExecutionPolicy
+	BeforeToolCall  func(ctx loop.BeforeToolCallContext, signal <-chan struct{}) *loop.BeforeToolCallResult
+	AfterToolCall   func(ctx loop.AfterToolCallContext, signal <-chan struct{}) *loop.AfterToolCallResult
 	PrepareNextTurn func(ctx loop.PrepareNextTurnContext) *loop.TurnUpdate
 }
 
@@ -40,7 +41,6 @@ type AgentConfig struct {
 type Agent struct {
 	state    AgentState
 	eventBus *EventBus
-	registry *MessageRegistry
 
 	steeringQueue *MessageQueue
 	followUpQueue *MessageQueue
@@ -52,7 +52,8 @@ type Agent struct {
 	hooks           loop.LoopHooks
 	queueConfig     QueueConfig
 	sessionID       string
-	thinkingBudgets *protocol.ThinkingBudgets
+	temperature     *float64
+	maxTokens       *int
 	transport       protocol.Transport
 	maxRetryDelayMs *int
 
@@ -71,20 +72,18 @@ func NewAgent(config AgentConfig) *Agent {
 	}
 
 	queueConfig := QueueConfig{
-		SteeringMode:  DrainOne,
-		FollowUpMode:  DrainOne,
+		SteeringMode: DrainOne,
+		FollowUpMode: DrainOne,
 	}
 	if config.QueueConfig != nil {
 		queueConfig = *config.QueueConfig
 	}
 
-	registry := NewMessageRegistry()
-
 	var convertToLlm loop.MessageTransformer
 	if config.ConvertToLlm != nil {
 		convertToLlm = config.ConvertToLlm
 	} else {
-		convertToLlm = registry.ConvertAll
+		convertToLlm = DefaultConvertToLlm
 	}
 
 	hooks := loop.LoopHooks{
@@ -96,7 +95,6 @@ func NewAgent(config AgentConfig) *Agent {
 	return &Agent{
 		state:           state,
 		eventBus:        NewEventBus(),
-		registry:        registry,
 		steeringQueue:   NewMessageQueue(queueConfig.SteeringMode),
 		followUpQueue:   NewMessageQueue(queueConfig.FollowUpMode),
 		streamFn:        config.StreamFn,
@@ -105,7 +103,8 @@ func NewAgent(config AgentConfig) *Agent {
 		hooks:           hooks,
 		queueConfig:     queueConfig,
 		sessionID:       config.SessionID,
-		thinkingBudgets: config.ThinkingBudgets,
+		temperature:     config.Temperature,
+		maxTokens:       config.MaxTokens,
 		transport:       config.Transport,
 		maxRetryDelayMs: config.MaxRetryDelayMs,
 	}
@@ -121,11 +120,6 @@ func (a *Agent) State() AgentState {
 // EventBus returns the agent's event bus for subscribing to events.
 func (a *Agent) EventBus() *EventBus {
 	return a.eventBus
-}
-
-// Registry returns the agent's message registry for registering custom message types.
-func (a *Agent) Registry() *MessageRegistry {
-	return a.registry
 }
 
 // Prompt sends a prompt to the agent and runs the loop until completion.
@@ -220,8 +214,6 @@ func (a *Agent) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state.Messages = nil
-	a.state.StreamingMessage = nil
-	a.state.PendingToolCalls = nil
 	a.state.LastError = nil
 	a.steeringQueue.Clear()
 	a.followUpQueue.Clear()
@@ -230,12 +222,11 @@ func (a *Agent) Reset() {
 // Compact applies compaction to the agent's message list.
 // Emits CompactEvent on the event bus.
 // Returns an error if firstKeptIndex is out of bounds.
-func (a *Agent) Compact(summary string, firstKeptIndex int, tokensBefore int, fileOps *protocol.FileOperations) error {
+func (a *Agent) Compact(summary string, firstKeptIndex int, tokensBefore int, tokensAfter int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	tokensAfter := EstimateTokens(a.state.Messages[firstKeptIndex:]) + len(summary)/4
-	compacted, err := CompactMessages(a.state.Messages, summary, firstKeptIndex, tokensBefore, tokensAfter, fileOps)
+	compacted, err := CompactMessages(a.state.Messages, summary, firstKeptIndex, tokensBefore, tokensAfter)
 	if err != nil {
 		return err
 	}
@@ -247,7 +238,6 @@ func (a *Agent) Compact(summary string, firstKeptIndex int, tokensBefore int, fi
 			FirstKeptID:  fmt.Sprintf("%d", firstKeptIndex),
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensAfter,
-			FileOps:      fileOps,
 		},
 	})
 	return nil
@@ -399,13 +389,14 @@ func (a *Agent) buildLoopConfig(state AgentState) loop.LoopConfig {
 	return loop.LoopConfig{
 		Model:           state.Model,
 		ThinkingLevel:   effectiveThinking,
+		Temperature:     a.temperature,
+		MaxTokens:       a.maxTokens,
 		Tools:           state.Tools,
 		StreamFn:        a.streamFn,
 		ConvertToLlm:    a.convertToLlm,
 		ToolExecution:   a.toolExecution,
 		Hooks:           a.hooks,
 		SessionID:       a.sessionID,
-		ThinkingBudgets: a.thinkingBudgets,
 		Transport:       a.transport,
 		MaxRetryDelayMs: a.maxRetryDelayMs,
 		SteeringDrain:   a.steeringQueue.Drain,

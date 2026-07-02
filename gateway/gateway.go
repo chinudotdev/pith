@@ -64,15 +64,15 @@ const (
 type ThinkingFormat string
 
 const (
-	ThinkingOpenAI          ThinkingFormat = "openai"
-	ThinkingOpenRouter      ThinkingFormat = "openrouter"
-	ThinkingDeepSeek        ThinkingFormat = "deepseek"
-	ThinkingTogether        ThinkingFormat = "together"
-	ThinkingZAI             ThinkingFormat = "zai"
-	ThinkingQwen            ThinkingFormat = "qwen"
-	ThinkingQwenChat        ThinkingFormat = "qwen-chat-template"
-	ThinkingString          ThinkingFormat = "string-thinking"
-	ThinkingAntLing         ThinkingFormat = "ant-ling"
+	ThinkingOpenAI     ThinkingFormat = "openai"
+	ThinkingOpenRouter ThinkingFormat = "openrouter"
+	ThinkingDeepSeek   ThinkingFormat = "deepseek"
+	ThinkingTogether   ThinkingFormat = "together"
+	ThinkingZAI        ThinkingFormat = "zai"
+	ThinkingQwen       ThinkingFormat = "qwen"
+	ThinkingQwenChat   ThinkingFormat = "qwen-chat-template"
+	ThinkingString     ThinkingFormat = "string-thinking"
+	ThinkingAntLing    ThinkingFormat = "ant-ling"
 )
 
 // CacheControlFormat specifies how a provider handles cache control.
@@ -87,31 +87,12 @@ const (
 // Capabilities belong to the provider, not the model.
 // A model says "I support thinking"; the provider says "I format thinking as reasoning_effort".
 type ProviderCapabilities struct {
-	// OpenAI-completions family
-	SupportsStore                       bool
-	SupportsDeveloperRole               bool
-	SupportsReasoningEffort             bool
-	SupportsUsageInStreaming            bool
-	MaxTokensField                      MaxTokensField
-	RequiresToolResultName              bool
-	RequiresAssistantAfterToolResult    bool
-	RequiresThinkingAsText              bool
-	RequiresReasoningContentOnAssistant bool
-	ThinkingFormat                      ThinkingFormat
-	SupportsStrictMode                  bool
-	CacheControlFormat                  CacheControlFormat
-	SendSessionAffinityHeaders          bool
-	SupportsLongCacheRetention          bool
-
-	// Anthropic-messages family
-	SupportsEagerToolInputStreaming bool
-	SupportsCacheControlOnTools     bool
-	SupportsTemperature             bool
-	ForceAdaptiveThinking           bool
-	AllowEmptySignature             bool
-
-	// OpenAI-responses family
-	SendSessionIDHeader bool
+	SupportsDeveloperRole    bool
+	SupportsReasoningEffort  bool
+	SupportsUsageInStreaming bool
+	MaxTokensField           MaxTokensField
+	RequiresToolResultName   bool
+	RequiresThinkingAsText   bool
 }
 
 // --- Provider Registry ---
@@ -174,202 +155,133 @@ func (r *ProviderRegistry) Clear() {
 	r.initialized = make(map[protocol.ApiId]bool)
 }
 
-// --- Model Catalog ---
-
-// ModelCatalog is a programmatic-only, in-memory model store.
-// No bundled data, no remote fetch, no local YAML.
-// The App layer provides the data via PiCatalog.
-type ModelCatalog struct {
-	mu        sync.RWMutex
-	models    map[protocol.ProviderId]map[string]protocol.ModelDescriptor // provider -> modelId -> descriptor
-	onUpdated []func()
+// LLMGateway is the top-level L1 composer. It owns the provider registry,
+// credential provider, and middleware pipeline.
+// Instance-based: no module-level singletons. Create with NewLLMGateway().
+type LLMGateway struct {
+	Providers   *ProviderRegistry
+	Credentials CredentialProvider
+	Middleware  []Middleware
 }
 
-// NewModelCatalog creates a new empty model catalog.
-func NewModelCatalog() *ModelCatalog {
-	return &ModelCatalog{
-		models: make(map[protocol.ProviderId]map[string]protocol.ModelDescriptor),
+// NewLLMGateway creates a new LLMGateway with empty registries.
+func NewLLMGateway() *LLMGateway {
+	return &LLMGateway{
+		Providers: NewProviderRegistry(),
+		Credentials: CredentialProviderFunc(func(protocol.ProviderId) (protocol.Credential, error) {
+			return nil, &protocol.Error{Code: protocol.ErrAuth, Message: "no credential provider configured"}
+		}),
 	}
 }
 
-// Register adds a model descriptor to the catalog.
-func (c *ModelCatalog) Register(provider protocol.ProviderId, model protocol.ModelDescriptor) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.models[provider] == nil {
-		c.models[provider] = make(map[string]protocol.ModelDescriptor)
-	}
-	c.models[provider][model.ID] = model
-	c.notifyUpdated()
-}
-
-// Unregister removes a model from the catalog.
-func (c *ModelCatalog) Unregister(provider protocol.ProviderId, modelID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if m, ok := c.models[provider]; ok {
-		delete(m, modelID)
-		c.notifyUpdated()
-	}
-}
-
-// Get returns a model descriptor by provider and model ID.
-func (c *ModelCatalog) Get(provider protocol.ProviderId, modelID string) (protocol.ModelDescriptor, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if m, ok := c.models[provider]; ok {
-		desc, found := m[modelID]
-		return desc, found
-	}
-	return protocol.ModelDescriptor{}, false
-}
-
-// List returns all models, optionally filtered by provider.
-func (c *ModelCatalog) List(provider ...protocol.ProviderId) []protocol.ModelDescriptor {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var result []protocol.ModelDescriptor
-	if len(provider) > 0 && provider[0] != "" {
-		if m, ok := c.models[provider[0]]; ok {
-			for _, desc := range m {
-				result = append(result, desc)
-			}
-		}
-	} else {
-		for _, m := range c.models {
-			for _, desc := range m {
-				result = append(result, desc)
-			}
+// Stream performs a streaming LLM call through the full pipeline:
+// resolve credentials → apply middleware → call provider.
+func (g *LLMGateway) Stream(ctx context.Context, model protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+	provider := g.Providers.Get(model.API)
+	if provider == nil {
+		return nil, &protocol.Error{
+			Code:    protocol.ErrNotSupported,
+			Message: fmt.Sprintf("no provider registered for API %q", model.API),
 		}
 	}
-	return result
-}
 
-// GetProviders returns all provider IDs that have models registered.
-func (c *ModelCatalog) GetProviders() []protocol.ProviderId {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	result := make([]protocol.ProviderId, 0, len(c.models))
-	for p := range c.models {
-		result = append(result, p)
+	// Deep-copy opts so middleware and providers can freely mutate it.
+	optsCopy := opts
+	opts = optsCopy
+	if opts.Headers != nil {
+		opts.Headers = copyMap(opts.Headers)
 	}
-	return result
-}
-
-// CalculateCost computes the dollar cost for a given usage and model.
-// This is a pure function that doesn't access catalog state, but is a method
-// for API convenience. No lock needed.
-func (c *ModelCatalog) CalculateCost(model protocol.ModelDescriptor, usage protocol.Usage) protocol.Cost {
-	cost := protocol.Cost{
-		Input:      float64(usage.Input) * model.Cost.Input / 1_000_000,
-		Output:     float64(usage.Output) * model.Cost.Output / 1_000_000,
-		CacheRead:  float64(usage.CacheRead) * model.Cost.CacheRead / 1_000_000,
-		CacheWrite: float64(usage.CacheWrite) * model.Cost.CacheWrite / 1_000_000,
-	}
-	cost.Total = cost.Input + cost.Output + cost.CacheRead + cost.CacheWrite
-	return cost
-}
-
-// Clear removes all models from the catalog.
-func (c *ModelCatalog) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.models = make(map[protocol.ProviderId]map[string]protocol.ModelDescriptor)
-	c.notifyUpdated()
-}
-
-// OnUpdated registers a callback for when the catalog changes.
-func (c *ModelCatalog) OnUpdated(fn func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onUpdated = append(c.onUpdated, fn)
-}
-
-func (c *ModelCatalog) notifyUpdated() {
-	for _, fn := range c.onUpdated {
-		fn()
-	}
-}
-
-// --- Capability Negotiation ---
-
-// EffectiveCapabilities is the result of merging model capabilities with provider capabilities.
-type EffectiveCapabilities struct {
-	// From the model
-	protocol.ModelCapabilities
-	// From the provider
-	ProviderCapabilities
-}
-
-// NegotiateCapabilityResult is the result of capability negotiation.
-type NegotiateCapabilityResult struct {
-	EffectiveCapabilities
-	Warnings []string // non-fatal issues (e.g., model wants thinking but provider doesn't support it)
-	Errors   []string // fatal issues that will likely cause request failures
-}
-
-// Negotiate merges model capabilities with provider capabilities and
-// identifies conflicts. Returns warnings for non-fatal mismatches and
-// errors for fatal ones.
-//
-// Example: model says "I support thinking" but provider doesn't have a
-// ThinkingFormat → warning (thinking will be silently disabled).
-// Model says "I support websocket" but provider doesn't → error.
-func Negotiate(model protocol.ModelDescriptor, provider ProviderCapabilities) NegotiateCapabilityResult {
-	result := NegotiateCapabilityResult{
-		EffectiveCapabilities: EffectiveCapabilities{
-			ModelCapabilities:    model.Capabilities,
-			ProviderCapabilities: provider,
-		},
+	if opts.Metadata != nil {
+		opts.Metadata = copyMapAny(opts.Metadata)
 	}
 
-	// Check thinking support
-	if model.Capabilities.Thinking && provider.ThinkingFormat == "" {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("model %q supports thinking but provider has no ThinkingFormat; thinking will be disabled", model.ID))
+	// Resolve credentials
+	if g.Credentials != nil {
+		cred, err := g.Credentials.Resolve(model.Provider)
+		if err != nil {
+			return nil, &protocol.Error{
+				Code:    protocol.ErrAuth,
+				Message: fmt.Sprintf("failed to resolve credentials for provider %q: %s", model.Provider, err.Error()),
+				Cause:   err,
+			}
+		}
+		opts.Credential = cred
 	}
 
-	// Check thinking level support
-	if model.Capabilities.Thinking {
-		for level, supported := range model.Capabilities.ThinkingLevels {
-			if supported && level != protocol.ThinkingOff && provider.ThinkingFormat == "" {
-				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("model %q supports thinking level %q but provider has no ThinkingFormat", model.ID, level))
+	// Initialize provider on first use only
+	g.Providers.mu.Lock()
+	if !g.Providers.initialized[model.API] {
+		if err := provider.Initialize(); err != nil {
+			g.Providers.mu.Unlock()
+			return nil, &protocol.Error{
+				Code:    protocol.ErrUnknown,
+				Message: fmt.Sprintf("failed to initialize provider %q: %s", provider.Name(), err.Error()),
+				Cause:   err,
+			}
+		}
+		g.Providers.initialized[model.API] = true
+	}
+	g.Providers.mu.Unlock()
+
+	streamFn := func(ctx context.Context, m protocol.ModelDescriptor, p protocol.Context, o protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		return provider.Stream(ctx, m, p, o)
+	}
+
+	for i := len(g.Middleware) - 1; i >= 0; i-- {
+		streamFn = g.Middleware[i].Wrap(streamFn)
+	}
+
+	return streamFn(ctx, model, pctx, opts)
+}
+
+// Complete performs a non-streaming LLM call. It streams internally
+// and returns the final accumulated message.
+func (g *LLMGateway) Complete(ctx context.Context, model protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (*protocol.AssistantMessage, error) {
+	ch, err := g.Stream(ctx, model, pctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var final *protocol.AssistantMessage
+	for event := range ch {
+		if event.Type == protocol.EventDone && event.Message != nil {
+			final = event.Message
+		}
+		if event.Type == protocol.EventError {
+			if event.Message != nil {
+				return event.Message, &protocol.Error{
+					Code:    protocol.ErrUnknown,
+					Message: event.Message.ErrorMessage,
+				}
+			}
+			return nil, &protocol.Error{
+				Code:    protocol.ErrUnknown,
+				Message: "streaming error with no message",
 			}
 		}
 	}
 
-	// Check transport support
-	// Note: transport availability is a provider-level concern. If a model
-	// declares a transport the provider doesn't support, that's a fatal error
-	// because the request will fail at the HTTP layer.
-	for transport, supported := range model.Capabilities.Transport {
-		if supported {
-			switch transport {
-			case protocol.TransportWebSocket, protocol.TransportWebSocketCached:
-				// WebSocket transport requires provider support — flag as warning
-				// since the gateway can fall back to SSE
-				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("model %q supports transport %q; verify provider supports it or will fall back to SSE", model.ID, transport))
-			case protocol.TransportSSE, protocol.TransportAuto:
-				// SSE and Auto are always supported
-			}
+	if final == nil {
+		return nil, &protocol.Error{
+			Code:    protocol.ErrUnknown,
+			Message: "stream completed without a Done event",
 		}
 	}
+	return final, nil
+}
 
-	// Check caching support
-	for cacheMode, supported := range model.Capabilities.Caching {
-		if supported && provider.CacheControlFormat == CacheControlNone && cacheMode != protocol.CacheNone {
-			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("model %q supports cache mode %q but provider has no CacheControlFormat", model.ID, cacheMode))
-		}
+func copyMap(m map[string]string) map[string]string {
+	cp := make(map[string]string, len(m))
+	for k, v := range m {
+		cp[k] = v
 	}
+	return cp
+}
 
-	// Check image input support
-	if model.Capabilities.Input[protocol.MediaImage] {
-		// Image support is model-level; provider just needs to pass it through.
-		// No specific provider capability to check against.
+func copyMapAny(m map[string]any) map[string]any {
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = v
 	}
-
-	return result
+	return cp
 }
