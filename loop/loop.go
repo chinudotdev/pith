@@ -255,6 +255,20 @@ type ToolResultDetails struct {
 	Terminate bool `json:"terminate,omitempty"`
 }
 
+// normalizeToolTermination copies ToolResult.Terminate into Details so the
+// runLoop termination scan can detect it.
+func normalizeToolTermination(toolResult *ToolResult) {
+	if !toolResult.Terminate {
+		return
+	}
+	if details, ok := toolResult.Details.(ToolResultDetails); ok {
+		details.Terminate = true
+		toolResult.Details = details
+	} else {
+		toolResult.Details = ToolResultDetails{Terminate: true}
+	}
+}
+
 // streamResponse calls the LLM and accumulates the assistant message.
 func streamResponse(
 	ctx context.Context,
@@ -642,6 +656,8 @@ func executeOneToolCall(
 			}
 		}
 	}
+
+	normalizeToolTermination(&toolResult)
 
 	// Emit ToolExecutionEnd
 	sink(LoopEvent{

@@ -274,3 +274,165 @@ func TestSteeringDuringTextTurnContinuesInnerLoop(t *testing.T) {
 		t.Fatalf("expected inner loop to continue after steering; stream called %d times", callCount)
 	}
 }
+
+func toolCallStreamFn(model protocol.ModelDescriptor, toolName string) loop.StreamFn {
+	return func(ctx context.Context, m protocol.ModelDescriptor, _ protocol.Context, _ protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		ch := make(chan protocol.StreamEvent, 8)
+		go func() {
+			defer close(ch)
+			partial := &protocol.AssistantMessage{
+				Role: "assistant", API: model.API, Provider: model.Provider, Model: model.ID, Timestamp: protocol.Now(),
+			}
+			tc := protocol.ToolCall{Type: "toolCall", ID: "tc1", Name: toolName, Arguments: `{}`}
+			ch <- protocol.StreamEvent{Type: protocol.EventStart, Partial: partial}
+			ch <- protocol.StreamEvent{Type: protocol.EventToolCallStart, ContentIndex: 0, Partial: partial}
+			ch <- protocol.StreamEvent{Type: protocol.EventToolCallEnd, ContentIndex: 0, ToolCall: &tc, Partial: partial}
+			ch <- protocol.StreamEvent{
+				Type: protocol.EventDone, Reason: protocol.StopTool,
+				Message: &protocol.AssistantMessage{
+					Role: "assistant", API: model.API, Provider: model.Provider, Model: model.ID,
+					Content: []protocol.ContentBlock{tc}, StopReason: protocol.StopTool, Timestamp: protocol.Now(),
+				},
+			}
+		}()
+		return ch, nil
+	}
+}
+
+func TestToolTerminateFromExecuteStopsLoop(t *testing.T) {
+	model := testModel()
+	streamCalls := 0
+	cfg := loop.LoopConfig{
+		Model: model,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			streamCalls++
+			return toolCallStreamFn(model, "stop_tool")(ctx, m, pctx, opts)
+		},
+		Tools: []loop.AgentTool{{
+			Name: "stop_tool",
+			Execute: func(callID string, params map[string]any, signal <-chan struct{}, onUpdate func(partial any)) loop.ToolResult {
+				return loop.ToolResult{
+					Content:   []protocol.Content{protocol.TextContent{Type: "text", Text: "done"}},
+					Terminate: true,
+				}
+			},
+		}},
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "go"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, cfg, func(event loop.LoopEvent) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamCalls != 1 {
+		t.Fatalf("expected loop to stop after terminating tool; stream called %d times", streamCalls)
+	}
+}
+
+func TestAfterToolCallTerminateStopsLoop(t *testing.T) {
+	model := testModel()
+	streamCalls := 0
+	cfg := loop.LoopConfig{
+		Model: model,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			streamCalls++
+			return toolCallStreamFn(model, "hook_stop")(ctx, m, pctx, opts)
+		},
+		Tools: []loop.AgentTool{{
+			Name: "hook_stop",
+			Execute: func(callID string, params map[string]any, signal <-chan struct{}, onUpdate func(partial any)) loop.ToolResult {
+				return loop.ToolResult{Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "ok"}}}
+			},
+		}},
+		Hooks: loop.LoopHooks{
+			AfterToolCall: func(ctx loop.AfterToolCallContext, signal <-chan struct{}) *loop.AfterToolCallResult {
+				return &loop.AfterToolCallResult{Terminate: true}
+			},
+		},
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "go"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, cfg, func(event loop.LoopEvent) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamCalls != 1 {
+		t.Fatalf("expected loop to stop after AfterToolCall terminate; stream called %d times", streamCalls)
+	}
+}
+
+func TestPrepareNextTurnThinkingLevelForwarded(t *testing.T) {
+	model := testModel()
+	streamCalls := 0
+	var seenLevels []protocol.ThinkingLevel
+	cfg := loop.LoopConfig{
+		Model:         model,
+		ThinkingLevel: protocol.ThinkingOff,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			streamCalls++
+			seenLevels = append(seenLevels, opts.Reasoning)
+			if streamCalls == 1 {
+				return toolCallStreamFn(model, "noop")(ctx, m, pctx, opts)
+			}
+			return fakeStream(streamFakeConfig{Text: "second turn"})(ctx, m, pctx, opts)
+		},
+		Tools: []loop.AgentTool{{
+			Name: "noop",
+			Execute: func(callID string, params map[string]any, signal <-chan struct{}, onUpdate func(partial any)) loop.ToolResult {
+				return loop.ToolResult{Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "ok"}}}
+			},
+		}},
+		Hooks: loop.LoopHooks{
+			PrepareNextTurn: func(ctx loop.PrepareNextTurnContext) *loop.TurnUpdate {
+				return &loop.TurnUpdate{ThinkingLevel: protocol.ThinkingHigh}
+			},
+		},
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "go"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, cfg, func(event loop.LoopEvent) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamCalls != 2 {
+		t.Fatalf("expected two stream calls, got %d", streamCalls)
+	}
+	if len(seenLevels) != 2 || seenLevels[0] != protocol.ThinkingOff || seenLevels[1] != protocol.ThinkingHigh {
+		t.Fatalf("unexpected reasoning levels: %#v", seenLevels)
+	}
+}
+
+func TestStreamOptionsTemperatureAndMaxTokensForwarded(t *testing.T) {
+	model := testModel()
+	temp := 0.5
+	maxTokens := 128
+	var seenOpts []protocol.StreamOptions
+	cfg := loop.LoopConfig{
+		Model:       model,
+		Temperature: &temp,
+		MaxTokens:   &maxTokens,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			seenOpts = append(seenOpts, opts)
+			return fakeStream(streamFakeConfig{Text: "ok"})(ctx, m, pctx, opts)
+		},
+	}
+
+	_, err := loop.AgentLoop(context.Background(), []protocol.Message{
+		protocol.UserMessage{Role: "user", Content: []protocol.Content{protocol.TextContent{Type: "text", Text: "hi"}}, Timestamp: protocol.Now()},
+	}, loop.AgentContext{}, cfg, func(event loop.LoopEvent) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(seenOpts) != 1 {
+		t.Fatalf("expected one stream call, got %d", len(seenOpts))
+	}
+	if seenOpts[0].Temperature == nil || *seenOpts[0].Temperature != temp {
+		t.Fatalf("expected temperature %v, got %#v", temp, seenOpts[0].Temperature)
+	}
+	if seenOpts[0].MaxTokens == nil || *seenOpts[0].MaxTokens != maxTokens {
+		t.Fatalf("expected max tokens %v, got %#v", maxTokens, seenOpts[0].MaxTokens)
+	}
+}

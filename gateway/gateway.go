@@ -60,29 +60,6 @@ const (
 	MaxTokensLegacy     MaxTokensField = "max_tokens"
 )
 
-// ThinkingFormat specifies how a provider formats thinking/reasoning parameters.
-type ThinkingFormat string
-
-const (
-	ThinkingOpenAI     ThinkingFormat = "openai"
-	ThinkingOpenRouter ThinkingFormat = "openrouter"
-	ThinkingDeepSeek   ThinkingFormat = "deepseek"
-	ThinkingTogether   ThinkingFormat = "together"
-	ThinkingZAI        ThinkingFormat = "zai"
-	ThinkingQwen       ThinkingFormat = "qwen"
-	ThinkingQwenChat   ThinkingFormat = "qwen-chat-template"
-	ThinkingString     ThinkingFormat = "string-thinking"
-	ThinkingAntLing    ThinkingFormat = "ant-ling"
-)
-
-// CacheControlFormat specifies how a provider handles cache control.
-type CacheControlFormat string
-
-const (
-	CacheControlAnthropic CacheControlFormat = "anthropic"
-	CacheControlNone      CacheControlFormat = "none"
-)
-
 // ProviderCapabilities declares what a provider supports.
 // Capabilities belong to the provider, not the model.
 // A model says "I support thinking"; the provider says "I format thinking as reasoning_effort".
@@ -155,6 +132,28 @@ func (r *ProviderRegistry) Clear() {
 	r.initialized = make(map[protocol.ApiId]bool)
 }
 
+// EnsureInitialized calls Initialize on the provider for api once and returns
+// any initialization error.
+func (r *ProviderRegistry) EnsureInitialized(api protocol.ApiId) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.initialized[api] {
+		return nil
+	}
+	provider := r.providers[api]
+	if provider == nil {
+		return &protocol.Error{
+			Code:    protocol.ErrNotSupported,
+			Message: fmt.Sprintf("no provider registered for API %q", api),
+		}
+	}
+	if err := provider.Initialize(); err != nil {
+		return err
+	}
+	r.initialized[api] = true
+	return nil
+}
+
 // LLMGateway is the top-level L1 composer. It owns the provider registry,
 // credential provider, and middleware pipeline.
 // Instance-based: no module-level singletons. Create with NewLLMGateway().
@@ -194,6 +193,18 @@ func (g *LLMGateway) Stream(ctx context.Context, model protocol.ModelDescriptor,
 	if opts.Metadata != nil {
 		opts.Metadata = copyMapAny(opts.Metadata)
 	}
+	if opts.Temperature != nil {
+		v := *opts.Temperature
+		opts.Temperature = &v
+	}
+	if opts.MaxTokens != nil {
+		v := *opts.MaxTokens
+		opts.MaxTokens = &v
+	}
+	if opts.MaxRetryDelayMs != nil {
+		v := *opts.MaxRetryDelayMs
+		opts.MaxRetryDelayMs = &v
+	}
 
 	// Resolve credentials
 	if g.Credentials != nil {
@@ -208,20 +219,13 @@ func (g *LLMGateway) Stream(ctx context.Context, model protocol.ModelDescriptor,
 		opts.Credential = cred
 	}
 
-	// Initialize provider on first use only
-	g.Providers.mu.Lock()
-	if !g.Providers.initialized[model.API] {
-		if err := provider.Initialize(); err != nil {
-			g.Providers.mu.Unlock()
-			return nil, &protocol.Error{
-				Code:    protocol.ErrUnknown,
-				Message: fmt.Sprintf("failed to initialize provider %q: %s", provider.Name(), err.Error()),
-				Cause:   err,
-			}
+	if err := g.Providers.EnsureInitialized(model.API); err != nil {
+		return nil, &protocol.Error{
+			Code:    protocol.ErrUnknown,
+			Message: fmt.Sprintf("failed to initialize provider %q: %s", provider.Name(), err.Error()),
+			Cause:   err,
 		}
-		g.Providers.initialized[model.API] = true
 	}
-	g.Providers.mu.Unlock()
 
 	streamFn := func(ctx context.Context, m protocol.ModelDescriptor, p protocol.Context, o protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
 		return provider.Stream(ctx, m, p, o)
@@ -249,7 +253,7 @@ func (g *LLMGateway) Complete(ctx context.Context, model protocol.ModelDescripto
 		}
 		if event.Type == protocol.EventError {
 			if event.Message != nil {
-				return event.Message, &protocol.Error{
+				return nil, &protocol.Error{
 					Code:    protocol.ErrUnknown,
 					Message: event.Message.ErrorMessage,
 				}

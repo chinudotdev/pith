@@ -124,12 +124,59 @@ func TestCredentialInjection(t *testing.T) {
 func TestCompleteErrorPath(t *testing.T) {
 	gw := gatewaytest.NewFauxGateway(gatewaytest.FauxResponse{StopReason: protocol.StopError})
 	model := gatewaytest.FauxModel()
-	_, err := gw.Complete(context.Background(), model, protocol.Context{}, protocol.StreamOptions{})
+	msg, err := gw.Complete(context.Background(), model, protocol.Context{}, protocol.StreamOptions{})
 	if err == nil {
 		t.Fatal("expected complete to return error on EventError")
+	}
+	if msg != nil {
+		t.Fatal("expected nil message on error path")
 	}
 	var perr *protocol.Error
 	if !errors.As(err, &perr) {
 		t.Fatalf("expected protocol.Error, got %T", err)
+	}
+}
+
+type optsMutatingMiddleware struct {
+	mutate func(*protocol.StreamOptions)
+}
+
+func (m *optsMutatingMiddleware) Name() string { return "opts-mutator" }
+func (m *optsMutatingMiddleware) Wrap(inner gateway.StreamFunction) gateway.StreamFunction {
+	return func(ctx context.Context, model protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+		if m.mutate != nil {
+			m.mutate(&opts)
+		}
+		return inner(ctx, model, pctx, opts)
+	}
+}
+
+func TestStreamOptionsPointerIsolation(t *testing.T) {
+	gw := gatewaytest.NewFauxGateway(gatewaytest.FauxResponse{Text: "hello"})
+	model := gatewaytest.FauxModel()
+
+	originalTemp := 0.7
+	callerTemp := originalTemp
+	opts := protocol.StreamOptions{Temperature: &callerTemp}
+
+	gw.Middleware = []gateway.Middleware{
+		&optsMutatingMiddleware{
+			mutate: func(o *protocol.StreamOptions) {
+				if o.Temperature != nil {
+					*o.Temperature = 0.1
+				}
+			},
+		},
+	}
+
+	ch, err := gw.Stream(context.Background(), model, protocol.Context{}, opts)
+	if err != nil {
+		t.Fatalf("unexpected stream error: %v", err)
+	}
+	for range ch {
+	}
+
+	if callerTemp != originalTemp {
+		t.Fatalf("middleware mutated caller temperature: got %v want %v", callerTemp, originalTemp)
 	}
 }

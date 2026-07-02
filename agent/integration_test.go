@@ -345,6 +345,9 @@ func TestL3AgentCompact(t *testing.T) {
 	if compactEvents[0].Summary != "Summary of old conversation" {
 		t.Errorf("unexpected summary: %s", compactEvents[0].Summary)
 	}
+	if compactEvents[0].FirstKeptIndex != 2 {
+		t.Errorf("expected FirstKeptIndex=2, got %d", compactEvents[0].FirstKeptIndex)
+	}
 
 	state := ag.State()
 	if len(state.Messages) != 2 {
@@ -385,6 +388,118 @@ func TestL3AgentAbort(t *testing.T) {
 
 	// Should not panic
 	_ = ag.State()
+}
+
+func TestL3AgentAbortViaAbortMethod(t *testing.T) {
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{Text: "Hello!", StreamDelay: 200 * time.Millisecond},
+	)
+	model := gatewaytest.FauxModel()
+
+	ag := agent.NewAgent(agent.AgentConfig{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			SystemPrompt:  "You are helpful.",
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
+		},
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			return gw.Stream(ctx, m, pctx, opts)
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- ag.Prompt(context.Background(), "Hi!")
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	ag.Abort()
+	ag.WaitForIdle()
+
+	err := <-done
+	if err == nil {
+		t.Fatal("expected non-nil error when aborted via Agent.Abort()")
+	}
+	if ag.State().IsStreaming {
+		t.Fatal("expected agent to be idle after WaitForIdle")
+	}
+}
+
+func TestL3AgentShouldStopAfterTurn(t *testing.T) {
+	gw := gatewaytest.NewFauxGateway(
+		gatewaytest.FauxResponse{Text: "first"},
+		gatewaytest.FauxResponse{Text: "second"},
+	)
+	model := gatewaytest.FauxModel()
+
+	ag := agent.NewAgent(agent.AgentConfig{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			SystemPrompt:  "You are helpful.",
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
+		},
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			return gw.Stream(ctx, m, pctx, opts)
+		},
+		ShouldStopAfterTurn: func(ctx loop.ShouldStopAfterTurnContext) bool {
+			return true
+		},
+	})
+	ag.FollowUp(protocol.UserMessage{
+		Role:      "user",
+		Content:   []protocol.Content{protocol.TextContent{Type: "text", Text: "follow up"}},
+		Timestamp: time.Now(),
+	})
+
+	err := ag.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := ag.State()
+	if len(state.Messages) != 2 {
+		t.Fatalf("expected 2 messages (user + assistant), got %d", len(state.Messages))
+	}
+	if !ag.HasQueuedMessages() {
+		t.Fatal("expected follow-up queue to remain undrained when ShouldStopAfterTurn returns true")
+	}
+}
+
+func TestL3AgentTemperatureMaxTokensForwarding(t *testing.T) {
+	temp := 0.3
+	maxTokens := 256
+	var seenOpts []protocol.StreamOptions
+
+	gw := gatewaytest.NewFauxGateway(gatewaytest.FauxResponse{Text: "ok"})
+	model := gatewaytest.FauxModel()
+
+	ag := agent.NewAgent(agent.AgentConfig{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			SystemPrompt:  "You are helpful.",
+			ThinkingLevel: thinkingPtr(protocol.ThinkingOff),
+		},
+		Temperature: &temp,
+		MaxTokens:   &maxTokens,
+		StreamFn: func(ctx context.Context, m protocol.ModelDescriptor, pctx protocol.Context, opts protocol.StreamOptions) (<-chan protocol.StreamEvent, error) {
+			seenOpts = append(seenOpts, opts)
+			return gw.Stream(ctx, m, pctx, opts)
+		},
+	})
+
+	err := ag.Prompt(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(seenOpts) != 1 {
+		t.Fatalf("expected one stream call, got %d", len(seenOpts))
+	}
+	if seenOpts[0].Temperature == nil || *seenOpts[0].Temperature != temp {
+		t.Fatalf("expected temperature %v, got %#v", temp, seenOpts[0].Temperature)
+	}
+	if seenOpts[0].MaxTokens == nil || *seenOpts[0].MaxTokens != maxTokens {
+		t.Fatalf("expected max tokens %v, got %#v", maxTokens, seenOpts[0].MaxTokens)
+	}
 }
 
 // TestL3AgentQueues verifies steering and follow-up queues.

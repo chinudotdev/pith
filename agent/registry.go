@@ -4,6 +4,10 @@ import "github.com/chinudotdev/pith/protocol"
 
 // DefaultConvertToLlm provides the built-in message conversion behavior
 // for loop runs. Applications can override this via AgentConfig.ConvertToLlm.
+//
+// Only UserMessage, AssistantMessage, ToolResultMessage, and CompactSummaryMessage
+// are passed through (CompactSummaryMessage is converted to UserMessage).
+// All other message types are omitted from the LLM payload.
 func DefaultConvertToLlm(messages []protocol.Message) []protocol.Message {
 	result := make([]protocol.Message, 0, len(messages))
 	for _, msg := range messages {

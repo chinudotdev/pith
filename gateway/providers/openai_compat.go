@@ -353,7 +353,19 @@ func (p *OpenAICompatProvider) parseSSEStream(ctx context.Context, body io.ReadC
 
 			var chunk openAIChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				continue
+				ch <- protocol.StreamEvent{
+					Type: protocol.EventError,
+					Message: &protocol.AssistantMessage{
+						Role:         "assistant",
+						API:          model.API,
+						Provider:     model.Provider,
+						Model:        model.ID,
+						ErrorMessage: fmt.Sprintf("failed to parse SSE chunk: %v", err),
+						StopReason:   protocol.StopError,
+						Timestamp:    protocol.Now(),
+					},
+				}
+				return
 			}
 
 			// Usage can arrive in a chunk with empty choices (OpenAI stream_options)

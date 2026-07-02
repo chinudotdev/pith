@@ -44,10 +44,10 @@ type AgentEvent struct {
 
 // CompactEvent is emitted when compaction is applied to the agent's messages.
 type CompactEvent struct {
-	Summary      string
-	FirstKeptID  string
-	TokensBefore int
-	TokensAfter  int
+	Summary        string
+	FirstKeptIndex int
+	TokensBefore   int
+	TokensAfter    int
 }
 
 // Listener is a function that receives agent events.

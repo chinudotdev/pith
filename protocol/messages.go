@@ -107,3 +107,11 @@ func (UserMessage) messageRole() string           { return "user" }
 func (AssistantMessage) messageRole() string      { return "assistant" }
 func (ToolResultMessage) messageRole() string     { return "toolResult" }
 func (CompactSummaryMessage) messageRole() string { return "compactSummary" }
+
+// FilterTestMessage is a protocol.Message implementation used in tests to
+// verify transformers drop unrecognized message types.
+type FilterTestMessage struct {
+	Role string `json:"role"`
+}
+
+func (FilterTestMessage) messageRole() string { return "filterTest" }

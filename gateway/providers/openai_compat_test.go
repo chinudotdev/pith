@@ -635,3 +635,38 @@ func TestParseSSEStreamScannerErrorEmitsError(t *testing.T) {
 		t.Fatal("expected EventError when scanner fails")
 	}
 }
+
+func TestParseSSEStreamInvalidJSONEmitsError(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"}}]}`,
+		`data: {not valid json}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	p := newTestProvider()
+	model := protocol.ModelDescriptor{ID: "gpt-4o", API: protocol.ApiOpenAICompletions, Provider: "openai"}
+	ch, err := p.parseSSEStream(context.Background(), io.NopCloser(strings.NewReader(sseData)), model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var gotError, gotDone bool
+	for event := range ch {
+		switch event.Type {
+		case protocol.EventError:
+			gotError = true
+			if event.Message == nil || event.Message.StopReason != protocol.StopError {
+				t.Fatalf("expected StopError on malformed chunk, got %#v", event.Message)
+			}
+		case protocol.EventDone:
+			gotDone = true
+		}
+	}
+	if !gotError {
+		t.Fatal("expected EventError for invalid JSON SSE chunk")
+	}
+	if gotDone {
+		t.Fatal("expected stream to stop on malformed JSON, not emit EventDone")
+	}
+}

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/chinudotdev/pith/loop"
@@ -19,19 +18,20 @@ type QueueConfig struct {
 
 // AgentConfig configures the creation of an Agent.
 type AgentConfig struct {
-	InitialState    *AgentState
-	StreamFn        loop.StreamFn
-	ConvertToLlm    loop.MessageTransformer
-	QueueConfig     *QueueConfig
-	SessionID       string
-	Temperature     *float64
-	MaxTokens       *int
-	Transport       protocol.Transport
-	MaxRetryDelayMs *int
-	ToolExecution   loop.ToolExecutionPolicy
-	BeforeToolCall  func(ctx loop.BeforeToolCallContext, signal <-chan struct{}) *loop.BeforeToolCallResult
-	AfterToolCall   func(ctx loop.AfterToolCallContext, signal <-chan struct{}) *loop.AfterToolCallResult
-	PrepareNextTurn func(ctx loop.PrepareNextTurnContext) *loop.TurnUpdate
+	InitialState        *AgentState
+	StreamFn            loop.StreamFn
+	ConvertToLlm        loop.MessageTransformer
+	QueueConfig         *QueueConfig
+	SessionID           string
+	Temperature         *float64
+	MaxTokens           *int
+	Transport           protocol.Transport
+	MaxRetryDelayMs     *int
+	ToolExecution       loop.ToolExecutionPolicy
+	BeforeToolCall      func(ctx loop.BeforeToolCallContext, signal <-chan struct{}) *loop.BeforeToolCallResult
+	AfterToolCall       func(ctx loop.AfterToolCallContext, signal <-chan struct{}) *loop.AfterToolCallResult
+	ShouldStopAfterTurn func(ctx loop.ShouldStopAfterTurnContext) bool
+	PrepareNextTurn     func(ctx loop.PrepareNextTurnContext) *loop.TurnUpdate
 }
 
 // --- Agent ---
@@ -87,9 +87,10 @@ func NewAgent(config AgentConfig) *Agent {
 	}
 
 	hooks := loop.LoopHooks{
-		BeforeToolCall:  config.BeforeToolCall,
-		AfterToolCall:   config.AfterToolCall,
-		PrepareNextTurn: config.PrepareNextTurn,
+		BeforeToolCall:      config.BeforeToolCall,
+		AfterToolCall:       config.AfterToolCall,
+		ShouldStopAfterTurn: config.ShouldStopAfterTurn,
+		PrepareNextTurn:     config.PrepareNextTurn,
 	}
 
 	return &Agent{
@@ -234,10 +235,10 @@ func (a *Agent) Compact(summary string, firstKeptIndex int, tokensBefore int, to
 
 	a.eventBus.Emit(AgentEvent{
 		CompactEvent: &CompactEvent{
-			Summary:      summary,
-			FirstKeptID:  fmt.Sprintf("%d", firstKeptIndex),
-			TokensBefore: tokensBefore,
-			TokensAfter:  tokensAfter,
+			Summary:        summary,
+			FirstKeptIndex: firstKeptIndex,
+			TokensBefore:   tokensBefore,
+			TokensAfter:    tokensAfter,
 		},
 	})
 	return nil
